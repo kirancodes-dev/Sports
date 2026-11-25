@@ -1,0 +1,488 @@
+{% extends "base_classic.html" %}
+{#- Create an event (UPG-73, UPG-74): one wizard for every kind of event, driven by
+    services_event_types. Without JavaScript every step shows at once; with it the
+    steps show one at a time. Nothing here publishes: the event is saved as a draft
+    and checked on the review page. -#}
+{% set app_active = 'dashboard' %}
+{% block csrf_meta %}<meta name="csrf-token" content="{{ csrf_token() }}">{% endblock %}
+{% block title %}{% if editing %}Edit {{ editing.title }}{% elif parent %}Add an event to {{ parent.title }}{% else %}Create an event{% endif %}{% endblock %}
+{% block page_title %}{% if editing %}Edit event{% elif parent %}Add an event to {{ parent.title }}{% else %}Create an event{% endif %}{% endblock %}
+{% block page_sub %}{% if editing %}{{ editing.title }}. Changes are saved straight away; people already registered are told about date, time or venue changes.{% elif parent %}It must take place during the fest ({{ parent.date }}{% if parent.end_date and parent.end_date != parent.date %} to {{ parent.end_date }}{% endif %}).{% else %}Pick the kind of event, fill in the steps, and you'll get a draft to check before it goes live.{% endif %}{% endblock %}
+{% block page_actions %}{% if editing %}<a href="/spoc/event/{{ editing.id }}/review" class="btn btn-secondary"><i class="fas fa-arrow-left" aria-hidden="true"></i> Back to review</a>{% else %}<a href="{{ '/spoc/event/' ~ parent.id ~ '/review' if parent else '/spoc/dashboard' }}" class="btn btn-secondary"><i class="fas fa-arrow-left" aria-hidden="true"></i> {{ 'Back to the fest' if parent else 'Console' }}</a>{% endif %}{% endblock %}
+
+{%- set v = values or {} -%}
+{%- macro val(name, default='') -%}{{ v.get(name, default) if v.get(name) is not none else default }}{%- endmacro -%}
+{%- macro checked(name, value, default=false) -%}
+{%- set cur = v.get(name) -%}
+{%- if cur is none -%}{{ 'checked' if default else '' }}
+{%- elif cur is string -%}{{ 'checked' if cur == value else '' }}
+{%- else -%}{{ 'checked' if value in cur else '' }}{%- endif -%}
+{%- endmacro -%}
+
+{% block extra_css %}
+<style>
+/* Create-event wizard (UPG-73) */
+.wz { max-width: 1040px; }
+.wz-steps { display: flex; gap: 6px; overflow-x: auto; padding: 0 0 4px; margin: 0 0 20px; list-style: none; scrollbar-width: none; }
+.wz-steps li { flex: 1 0 auto; }
+.wz-steps button { width: 100%; display: flex; align-items: center; gap: 8px; background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; font-size: var(--fs-sm); color: var(--text-muted); font-weight: 600; white-space: nowrap; }
+.wz-steps .n { width: 22px; height: 22px; border-radius: 50%; background: var(--surface-sunken); color: var(--text-muted); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0; }
+.wz-steps button[aria-current="step"] { border-color: var(--brand-navy); color: var(--brand-ink); box-shadow: inset 0 -2px 0 var(--brand-gold); }
+.wz-steps button[aria-current="step"] .n { background: var(--brand-navy); color: #fff; }
+.wz-steps button.is-done .n { background: var(--success); color: #fff; }
+.wz-step { margin-bottom: 20px; }
+.js .wz-step { display: none; }
+.js .wz-step.is-active { display: block; }
+.wz-step > .panel > h2 { font-size: 1.1rem; margin: 0 0 4px; }
+.wz-step > .panel > h2[tabindex="-1"]:focus { outline: none; }
+.wz-step > .panel > .wz-lead { color: var(--text-muted); font-size: var(--fs-sm); margin-bottom: 18px; }
+.wz-group { margin-bottom: 18px; }
+.wz-group h3 { font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
+.type-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.type-opt { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.type-card { display: flex; gap: 10px; align-items: flex-start; height: 100%; border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; cursor: pointer; background: var(--surface-card); }
+.type-card i { width: 34px; height: 34px; border-radius: var(--radius-sm); background: var(--brand-navy-50); color: var(--brand-ink); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.type-card strong { display: block; font-size: var(--fs-sm); color: var(--text-strong); }
+.type-card small { display: block; color: var(--text-muted); font-size: var(--fs-xs); line-height: 1.35; margin-top: 2px; }
+.type-opt:checked + .type-card { border-color: var(--brand-navy); box-shadow: inset 0 0 0 1px var(--brand-navy); background: var(--brand-navy-50); }
+.type-opt:checked + .type-card i { background: var(--brand-navy); color: #fff; }
+.type-opt:focus-visible + .type-card { box-shadow: var(--focus-ring); }
+.wz-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 14px; }
+.wz-hint { font-size: var(--fs-xs); color: var(--text-muted); margin-top: 4px; }
+.seg-choice { display: flex; flex-wrap: wrap; gap: 8px; }
+.seg-choice input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.seg-choice label { border: 1px solid var(--border-strong); border-radius: var(--radius-pill); padding: 6px 14px; font-size: var(--fs-sm); cursor: pointer; background: var(--surface-card); }
+.seg-choice input:checked + label { background: var(--brand-navy); border-color: var(--brand-navy); color: #fff; }
+.seg-choice input:focus-visible + label { box-shadow: var(--focus-ring); }
+.wz-sub { border-top: 1px solid var(--divider); padding-top: 16px; margin-top: 16px; }
+.wz-sub > legend, .wz-sub > h3 { font-size: 1rem; font-weight: 700; margin: 0 0 10px; float: none; }
+.builder-row { display: grid; grid-template-columns: 2fr 90px 3fr 40px; gap: 8px; margin-bottom: 8px; align-items: start; }
+.builder-row.sponsor { grid-template-columns: 2fr 1fr 2fr 2fr 40px; }
+.builder-row.field { grid-template-columns: 2fr 1fr 2fr 90px 40px 40px 40px; }
+.builder-row.field.fixed { grid-template-columns: 2fr 3fr; padding: 8px 12px; border-radius: 8px; background: var(--surface-2, #f4f5f8); font-weight: 600; }
+.builder-row .is-unused { visibility: hidden; }
+@media (max-width: 767.98px) { .builder-row, .builder-row.sponsor, .builder-row.field { grid-template-columns: 1fr; padding-bottom: 10px; border-bottom: 1px solid var(--divider); } .builder-row.field { grid-template-columns: 1fr 44px 44px 44px; } .builder-row.field > .form-control, .builder-row.field > .form-select { grid-column: 1 / -1; } .builder-row.field.fixed { grid-template-columns: 1fr; } .builder-row .is-unused { display: none; } }
+.wz-actions { display: flex; justify-content: space-between; gap: 10px; margin-top: 18px; }
+.wz-summary dl { display: grid; grid-template-columns: 200px 1fr; gap: 6px 16px; margin: 0; font-size: var(--fs-sm); }
+.wz-summary dt { color: var(--text-muted); font-weight: 600; }
+.wz-summary dd { margin: 0; color: var(--text-strong); }
+@media (max-width: 575.98px) { .wz-summary dl { grid-template-columns: 1fr; } .wz-summary dd { margin-bottom: 6px; } }
+.banner-preview { max-width: 360px; aspect-ratio: 2 / 1; object-fit: cover; border-radius: var(--radius); border: 1px solid var(--border); display: block; margin-top: 8px; }
+.only-when-hidden { display: none !important; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wz">
+  {% if errors %}
+  <div class="alert alert-danger" role="alert" id="wz-errors" tabindex="-1">
+    <strong>Please fix {{ errors|length }} thing{{ 's' if errors|length != 1 }} before saving:</strong>
+    <ul class="mb-0 mt-1">{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  <ol class="wz-steps" aria-label="Steps" hidden id="wz-nav">
+    {% for label in ['Kind of event', 'Basics', 'When & where', 'Who can take part', 'Details & judging', 'Form & extras', 'Check & save'] %}
+    <li><button type="button" data-step-go="{{ loop.index }}"><span class="n">{{ loop.index }}</span>{{ label }}</button></li>
+    {% endfor %}
+  </ol>
+
+  <form method="POST" action="{{ '/spoc/event/' ~ editing.id ~ '/setup' if editing else '/spoc/create_event' }}" id="wz-form" novalidate>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% if parent and not editing %}<input type="hidden" name="parent_event_id" value="{{ parent.id }}">{% endif %}
+
+    {# ── 1. Kind of event ── #}
+    <section class="wz-step" data-step="1" aria-labelledby="st1">
+      <div class="panel">
+        <h2 id="st1">What kind of event is it?</h2>
+        <p class="wz-lead">This sets sensible defaults and the details we ask for. You can change everything later.</p>
+        {% set chosen = v.get('event_type') or ('custom' if not parent else '') %}
+        {% for g in groups %}
+          {% set group_types = g.types if not parent else (g.types | rejectattr('fest') | list) %}
+          {% if group_types %}
+          <fieldset class="wz-group">
+            <legend class="visually-hidden">{{ g.label }}</legend>
+            <h3 aria-hidden="true"><i class="fas {{ g.icon }} text-gold"></i>{{ g.label }}</h3>
+            <div class="type-grid">
+              {% for t in group_types %}
+              <div>
+                <input class="type-opt" type="radio" name="event_type" id="type-{{ t.key }}" value="{{ t.key }}" {{ 'checked' if chosen == t.key }} required>
+                <label class="type-card" for="type-{{ t.key }}">
+                  <i class="fas {{ t.icon }}" aria-hidden="true"></i>
+                  <span><strong>{{ t.name }}</strong><small>{{ t.blurb }}</small></span>
+                </label>
+              </div>
+              {% endfor %}
+            </div>
+          </fieldset>
+          {% endif %}
+        {% endfor %}
+
+        {% if not parent and fests %}
+        <div class="wz-sub" data-hide-for-fest>
+          <label class="form-label" for="parent-pick">Part of a fest?</label>
+          <select class="form-select" id="parent-pick" name="parent_event_id" style="max-width:420px">
+            <option value="">No, a standalone event</option>
+            {% for f in fests %}<option value="{{ f.id }}" {{ 'selected' if v.get('parent_event_id') == f.id }}>{{ f.title }} ({{ f.date }})</option>{% endfor %}
+          </select>
+          <div class="wz-hint">Events inside a fest appear on the fest's page and must fall within its dates.</div>
+        </div>
+        {% endif %}
+      </div>
+    </section>
+
+    {# ── 2. Basics ── #}
+    <section class="wz-step" data-step="2" aria-labelledby="st2">
+      <div class="panel">
+        <h2 id="st2">Basics</h2>
+        <p class="wz-lead">What participants see first.</p>
+        <div class="mb-3">
+          <label class="form-label" for="f-title">Event title</label>
+          <div class="input-group">
+            <input class="form-control" id="f-title" name="title" maxlength="300" required value="{{ val('title') }}" placeholder="e.g. HackSaptha 2026">
+            <button type="button" class="btn btn-outline-primary" id="ai-toggle"><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> Write with AI</button>
+          </div>
+        </div>
+        <div class="callout callout--brand mb-3" id="ai-box" hidden>
+          <label class="form-label" for="ai-prompt">Tell the assistant about the event (optional)</label>
+          <textarea class="form-control" id="ai-prompt" rows="2" placeholder="e.g. 24-hour hackathon on climate tech for second and third years"></textarea>
+          <button type="button" class="btn btn-primary btn-sm mt-2" id="ai-go"><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> Write the description and rules</button>
+          <div class="wz-hint">It fills in the description and rules below; read and edit them before saving.</div>
+        </div>
+        <div class="wz-row">
+          <div>
+            <label class="form-label" for="f-category">Category</label>
+            <select class="form-select" id="f-category" name="category">
+              {% for c in categories %}<option value="{{ c }}" {{ 'selected' if val('category') == c }}>{{ c }}</option>{% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="form-label" for="f-visibility">Who can find it</label>
+            <select class="form-select" id="f-visibility" name="visibility">
+              <option value="Public" {{ 'selected' if val('visibility','Public') == 'Public' }}>Everyone (listed publicly)</option>
+              <option value="Department" {{ 'selected' if val('visibility') == 'Department' }}>My department only</option>
+              <option value="Private" {{ 'selected' if val('visibility') == 'Private' }}>Only people with the link</option>
+            </select>
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="f-description">Description</label>
+          <textarea class="form-control" id="f-description" name="description" rows="5" placeholder="What happens, who it is for, and what participants get.">{{ val('description') }}</textarea>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="f-rules">Rules and guidelines</label>
+          <textarea class="form-control" id="f-rules" name="rules" rows="5" placeholder="One rule per line: eligibility, what's allowed, timings, disqualification.">{{ val('rules') }}</textarea>
+        </div>
+        <div>
+          <label class="form-label" for="f-banner">Banner image address <span class="text-muted fw-normal">(optional)</span></label>
+          <input class="form-control" id="f-banner" name="banner_url" type="url" value="{{ val('banner_url') }}" placeholder="https://…/poster.jpg">
+          <div class="wz-hint">A wide image (2:1) works best. Without one, the card shows the category icon.</div>
+          <img id="banner-preview" class="banner-preview" alt="Banner preview" hidden>
+        </div>
+      </div>
+    </section>
+
+    {# ── 3. When & where ── #}
+    <section class="wz-step" data-step="3" aria-labelledby="st3">
+      <div class="panel">
+        <h2 id="st3">When and where</h2>
+        <p class="wz-lead">Multi-day events: set an end date. Times are in IST.</p>
+        <div class="wz-row">
+          <div><label class="form-label" for="f-date">Starts on</label><input class="form-control" type="date" id="f-date" name="date" required value="{{ val('date') }}" {% if parent %}min="{{ parent.date }}" max="{{ parent.end_date or parent.date }}"{% endif %}></div>
+          <div><label class="form-label" for="f-time">Start time</label><input class="form-control" type="time" id="f-time" name="time" value="{{ val('time') }}"></div>
+          <div><label class="form-label" for="f-end-date">Ends on</label><input class="form-control" type="date" id="f-end-date" name="end_date" value="{{ val('end_date') }}" {% if parent %}min="{{ parent.date }}" max="{{ parent.end_date or parent.date }}"{% endif %}><div class="wz-hint">Leave empty for a one-day event.</div></div>
+          <div><label class="form-label" for="f-end-time">End time</label><input class="form-control" type="time" id="f-end-time" name="end_time" value="{{ val('end_time') }}"></div>
+        </div>
+        <div class="wz-row" data-hide-for-fest>
+          <div><label class="form-label" for="f-reg-opens">Registration opens <span class="text-muted fw-normal">(optional)</span></label><input class="form-control" type="date" id="f-reg-opens" name="reg_opens" value="{{ val('reg_opens') }}"></div>
+          <div><label class="form-label" for="f-deadline">Last date to register</label><input class="form-control" type="date" id="f-deadline" name="reg_deadline" value="{{ val('reg_deadline') }}"></div>
+        </div>
+        <div class="wz-sub">
+          <fieldset>
+            <legend class="form-label">How does it happen?</legend>
+            <div class="seg-choice">
+              {% for m, label in [('offline', 'In person'), ('online', 'Online'), ('hybrid', 'Both')] %}
+              <input type="radio" name="event_mode" id="mode-{{ m }}" value="{{ m }}" {{ checked('event_mode', m, m == 'offline') }}><label for="mode-{{ m }}">{{ label }}</label>
+              {% endfor %}
+            </div>
+          </fieldset>
+        </div>
+        <div class="wz-row mt-3" data-mode="offline hybrid">
+          <div>
+            <label class="form-label" for="f-room">Room <span class="text-muted fw-normal">(books it, checks clashes)</span></label>
+            <select class="form-select" id="f-room" name="room_id">
+              <option value="">No room booking</option>
+              {% for r in rooms %}<option value="{{ r.id }}" {{ 'selected' if val('room_id') == r.id }}>{{ r.name }}{% if r.capacity %} · {{ r.capacity }} seats{% endif %}</option>{% endfor %}
+            </select>
+          </div>
+          <div><label class="form-label" for="f-venue">Venue</label><input class="form-control" id="f-venue" name="venue" value="{{ val('venue') }}" placeholder="e.g. Main auditorium, Block A"></div>
+          <div><label class="form-label" for="f-map">Map link <span class="text-muted fw-normal">(optional)</span></label><input class="form-control" type="url" id="f-map" name="map_link" value="{{ val('map_link') }}" placeholder="https://maps.google.com/…"></div>
+        </div>
+        <div class="wz-row" data-mode="online hybrid">
+          <div><label class="form-label" for="f-online">Meeting link</label><input class="form-control" type="url" id="f-online" name="online_link" value="{{ val('online_link') }}" placeholder="https://meet.google.com/…"><div class="wz-hint">Shown to registered participants, not on the public page.</div></div>
+        </div>
+      </div>
+    </section>
+
+    {# ── 4. Who can take part ── #}
+    <section class="wz-step" data-step="4" aria-labelledby="st4">
+      <div class="panel">
+        <h2 id="st4">Who can take part</h2>
+        <p class="wz-lead" data-show-for-fest>A fest has no registration of its own: people register for the events inside it. You can skip this step.</p>
+        <div data-hide-for-fest>
+          <p class="wz-lead">Eligibility, seats, teams and fees.</p>
+          <fieldset class="mb-3">
+            <legend class="form-label">Who can register</legend>
+            <div class="seg-choice">
+              {% for p, label in [('student', 'Students'), ('faculty', 'Faculty'), ('external', 'External participants')] %}
+              <input type="checkbox" name="allowed_participants" id="aud-{{ p }}" value="{{ p }}" {{ checked('allowed_participants', p) }}><label for="aud-{{ p }}">{{ label }}</label>
+              {% endfor %}
+            </div>
+            <div class="wz-hint">Pick none to use the default for this kind of event.</div>
+          </fieldset>
+          <fieldset class="mb-3">
+            <legend class="form-label">Which years <span class="text-muted fw-normal">(students; none = all)</span></legend>
+            <div class="seg-choice">
+              {% for y in [1, 2, 3, 4, 5] %}
+              <input type="checkbox" name="allowed_years" id="yr-{{ y }}" value="{{ y }}" {{ checked('allowed_years', y|string) }}><label for="yr-{{ y }}">Year {{ y }}</label>
+              {% endfor %}
+            </div>
+          </fieldset>
+          <div class="wz-row">
+            <div><label class="form-label" for="f-capacity">Seats / maximum registrations</label><input class="form-control" type="number" min="0" id="f-capacity" name="max_participants" value="{{ val('max_participants') }}" placeholder="0 = no limit"></div>
+            <div>
+              <label class="form-label" for="f-participation">Taking part as</label>
+              <select class="form-select" id="f-participation" name="participation_type">
+                {% for p, label in [('Individual', 'Individuals'), ('Team', 'Teams'), ('Both', 'Individuals or teams')] %}<option value="{{ p }}" {{ 'selected' if val('participation_type') == p }}>{{ label }}</option>{% endfor %}
+              </select>
+            </div>
+          </div>
+          <div class="wz-row" id="team-row">
+            <div><label class="form-label" for="f-team-min">Smallest team</label><input class="form-control" type="number" min="1" max="50" id="f-team-min" name="team_min" value="{{ val('team_min') }}"></div>
+            <div><label class="form-label" for="f-team-max">Largest team</label><input class="form-control" type="number" min="1" max="50" id="f-team-max" name="team_max" value="{{ val('team_max') }}"></div>
+            <div><label class="form-label" for="f-max-teams">Maximum teams <span class="text-muted fw-normal">(optional)</span></label><input class="form-control" type="number" min="0" id="f-max-teams" name="max_teams" value="{{ val('max_teams') }}" placeholder="0 = no limit"></div>
+          </div>
+          <div class="wz-sub">
+            <h3>Fees</h3>
+            <div class="wz-row">
+              <div><label class="form-label" for="f-fee">Registration fee (₹)</label><input class="form-control" type="number" min="0" step="1" id="f-fee" name="reg_fee" value="{{ val('reg_fee', '0') }}"><div class="wz-hint">0 for a free event. Paid events collect payment at registration.</div></div>
+            </div>
+            <details {{ 'open' if v.get('fee_faculty') or v.get('fee_external') or v.get('fee_student') }}>
+              <summary class="form-label">Charge a different fee for some groups</summary>
+              <div class="wz-row mt-2">
+                <div><label class="form-label" for="f-fee-student">Students (₹)</label><input class="form-control" type="number" min="0" id="f-fee-student" name="fee_student" value="{{ val('fee_student') }}" placeholder="Same as above"></div>
+                <div><label class="form-label" for="f-fee-faculty">Faculty (₹)</label><input class="form-control" type="number" min="0" id="f-fee-faculty" name="fee_faculty" value="{{ val('fee_faculty') }}" placeholder="Same as above"></div>
+                <div><label class="form-label" for="f-fee-external">External (₹)</label><input class="form-control" type="number" min="0" id="f-fee-external" name="fee_external" value="{{ val('fee_external') }}" placeholder="Same as above"></div>
+              </div>
+            </details>
+            {# Ticket types: early bird, seat limits, team or per-head prices (UPG-155) #}
+            {% set tts = v.get('ticket_types') or [] %}
+            {% macro tt_row(t, n) %}
+            <fieldset class="wz-row tt-row border rounded p-2 mt-2" data-tt-row>
+              <legend class="visually-hidden">Ticket type</legend>
+              <input type="hidden" name="tt_id" value="{{ t.id or '' }}">
+              <div><label class="form-label">Name</label><input class="form-control" name="tt_name" maxlength="80" value="{{ t.name or '' }}" placeholder="e.g. Early bird"></div>
+              <div><label class="form-label">Price (₹)</label><input class="form-control" type="number" min="0" step="1" name="tt_price" value="{{ t.price if t.price is defined else '' }}"></div>
+              <div><label class="form-label">Charged</label>
+                <select class="form-select" name="tt_per">
+                  <option value="registration" {{ 'selected' if t.per != 'person' }}>Per registration (a whole team pays once)</option>
+                  <option value="person" {{ 'selected' if t.per == 'person' }}>Per person (× team members)</option>
+                </select></div>
+              <div><label class="form-label">On sale from</label><input class="form-control" type="date" name="tt_start" value="{{ t.sale_start or '' }}"></div>
+              <div><label class="form-label">Until</label><input class="form-control" type="date" name="tt_end" value="{{ t.sale_end or '' }}"></div>
+              <div><label class="form-label">Seats</label><input class="form-control" type="number" min="0" name="tt_seats" value="{{ t.seats or '' }}" placeholder="0 = no limit"></div>
+              {% set who = (t.who or [])|join(',') %}
+              <div><label class="form-label">For</label>
+                <select class="form-select" name="tt_who">
+                  {% for val_, label in [('', 'Everyone'), ('student', 'Students'), ('faculty', 'Faculty'), ('external', 'External'), ('student,faculty', 'Students and faculty'), ('faculty,external', 'Faculty and external'), ('student,external', 'Students and external')] %}
+                  <option value="{{ val_ }}" {{ 'selected' if who == val_ }}>{{ label }}</option>
+                  {% endfor %}
+                </select></div>
+              <div class="align-self-end"><button type="button" class="btn btn-outline-danger btn-sm" data-tt-remove>Remove</button></div>
+            </fieldset>
+            {% endmacro %}
+            <details id="tt-box" {{ 'open' if tts }}>
+              <summary class="form-label">Ticket types (early bird, limited seats, per-person prices)</summary>
+              <p class="wz-hint">When you add ticket types, each registrant picks one and pays its price; the fees above are then not used.</p>
+              <div id="tt-rows">{% for t in tts %}{{ tt_row(t, loop.index) }}{% endfor %}</div>
+              <template id="tt-template">{{ tt_row({}, 0) }}</template>
+              <button type="button" class="btn btn-outline-primary btn-sm mt-2" id="tt-add">Add a ticket type</button>
+            </details>
+            <details id="transfer-box" class="mt-3" {{ 'open' if val('transfers_allowed') }}>
+              <summary class="form-label">Ticket transfers</summary>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="transfers_allowed" id="tr-on" {{ 'checked' if val('transfers_allowed') }}>
+                <label class="form-check-label" for="tr-on">Let a registrant hand their ticket to someone else</label>
+              </div>
+              <label class="form-label mt-2" for="tr-hours">Transfers close this many hours before the start</label>
+              <input class="form-control" style="max-width:140px" type="number" min="0" max="720" id="tr-hours" name="transfer_cutoff_hours" value="{{ val('transfer_cutoff_hours', '24') }}">
+              <p class="wz-hint">The new holder needs an account and must be allowed to register (participant type, placement rules). A ticket can't move to someone who would pay more.</p>
+            </details>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    {# ── 5. Details & judging ── #}
+    <section class="wz-step" data-step="5" aria-labelledby="st5">
+      <div class="panel">
+        <h2 id="st5">Details and judging</h2>
+        <p class="wz-lead">What's specific to this kind of event.</p>
+
+        {% for key, t in types.items() if t.details %}
+        <fieldset class="type-details" data-for-type="{{ key }}">
+          <legend class="form-label fs-6">{{ t.name }} details</legend>
+          <div class="wz-row">
+            {% for f in t.details %}
+            {% set fname = 'detail_' ~ key ~ '__' ~ f.name %}
+            <div{% if f.kind == 'textarea' %} style="grid-column: 1 / -1"{% endif %}>
+              <label class="form-label" for="d-{{ key }}-{{ f.name }}">{{ f.label }}{% if not f.required %} <span class="text-muted fw-normal">(optional)</span>{% endif %}</label>
+              {% if f.kind == 'select' %}
+              <select class="form-select" id="d-{{ key }}-{{ f.name }}" name="{{ fname }}" {{ 'required' if f.required }}>
+                <option value="">Choose…</option>
+                {% for o in f.options %}<option value="{{ o }}" {{ 'selected' if val(fname) == o }}>{{ o }}</option>{% endfor %}
+              </select>
+              {% elif f.kind == 'textarea' %}
+              <textarea class="form-control" rows="3" id="d-{{ key }}-{{ f.name }}" name="{{ fname }}" placeholder="{{ f.placeholder }}" {{ 'required' if f.required }}>{{ val(fname) }}</textarea>
+              {% else %}
+              <input class="form-control" type="{{ 'number' if f.kind == 'number' else ('date' if f.kind == 'date' else 'text') }}" {% if f.kind == 'number' %}min="0"{% endif %} id="d-{{ key }}-{{ f.name }}" name="{{ fname }}" value="{{ val(fname) }}" placeholder="{{ f.placeholder }}" {{ 'required' if f.required }}>
+              {% endif %}
+              {% if f.help %}<div class="wz-hint">{{ f.help }}</div>{% endif %}
+            </div>
+            {% endfor %}
+          </div>
+        </fieldset>
+        {% endfor %}
+
+        <fieldset class="type-details" data-for-type="placement_drive">
+          <legend class="form-label fs-6">Company and eligibility</legend>
+          <div class="wz-row">
+            <div><label class="form-label" for="placement_company">Company</label><input class="form-control" id="placement_company" name="placement_company" value="{{ val('placement_company') }}" required></div>
+            <div><label class="form-label" for="placement_role">Role</label><input class="form-control" id="placement_role" name="placement_role" value="{{ val('placement_role') }}"></div>
+            <div><label class="form-label" for="placement_package">Package</label><input class="form-control" id="placement_package" name="placement_package" value="{{ val('placement_package') }}" placeholder="e.g. 8 LPA"></div>
+            <div><label class="form-label" for="placement_jd_link">Job description link</label><input class="form-control" type="url" id="placement_jd_link" name="placement_jd_link" value="{{ val('placement_jd_link') }}"></div>
+            <div><label class="form-label" for="placement_branches">Eligible branches</label><input class="form-control" id="placement_branches" name="placement_branches" value="{{ val('placement_branches') }}" placeholder="e.g. CSE, ISE (empty: all)"></div>
+            <div><label class="form-label" for="placement_years">Eligible years</label><input class="form-control" id="placement_years" name="placement_years" value="{{ val('placement_years') }}" placeholder="e.g. 4 (empty: all)"></div>
+            <div><label class="form-label" for="placement_min_cgpa">Minimum CGPA</label><input class="form-control" type="number" step="0.01" min="0" max="10" id="placement_min_cgpa" name="placement_min_cgpa" value="{{ val('placement_min_cgpa') }}"></div>
+            <div><label class="form-label" for="placement_max_backlogs">Maximum active backlogs</label><input class="form-control" type="number" min="0" id="placement_max_backlogs" name="placement_max_backlogs" value="{{ val('placement_max_backlogs') }}"></div>
+          </div>
+        </fieldset>
+
+        <div id="competition-block" class="wz-sub">
+          <h3>Competition setup</h3>
+          <div class="wz-row">
+            <div><label class="form-label" for="f-rounds">Number of rounds</label><input class="form-control" type="number" min="1" max="10" id="f-rounds" name="total_rounds" value="{{ val('total_rounds', '1') }}"></div>
+            <div>
+              <label class="form-label" for="f-submission">Participants submit</label>
+              <select class="form-select" id="f-submission" name="submission_type">
+                {% for s, label in [('none', 'Nothing'), ('github', 'A GitHub link'), ('drive', 'A Drive / document link'), ('file', 'A file')] %}<option value="{{ s }}" {{ 'selected' if val('submission_type') == s }}>{{ label }}</option>{% endfor %}
+              </select>
+            </div>
+          </div>
+          <div class="mb-3" id="judging-block">
+            <span class="form-label d-block">Judging criteria <span class="text-muted fw-normal">(judges score each one)</span></span>
+            <div id="crit-rows"></div>
+            <button type="button" class="btn btn-outline-primary btn-sm" id="crit-add"><i class="fas fa-plus" aria-hidden="true"></i> Add a criterion</button>
+            <button type="button" class="btn btn-link btn-sm" id="crit-defaults">Use a standard rubric</button>
+            <input type="hidden" name="judging_criteria_json" id="crit-json" value="{{ val('judging_criteria_json', '[]') }}">
+          </div>
+          <div class="wz-row">
+            <div><label class="form-label" for="f-prize1">1st prize</label><input class="form-control" id="f-prize1" name="prize_1" value="{{ val('prize_1') }}" placeholder="e.g. ₹10,000 + trophy"></div>
+            <div><label class="form-label" for="f-prize2">2nd prize</label><input class="form-control" id="f-prize2" name="prize_2" value="{{ val('prize_2') }}"></div>
+            <div><label class="form-label" for="f-prize3">3rd prize</label><input class="form-control" id="f-prize3" name="prize_3" value="{{ val('prize_3') }}"></div>
+            <div><label class="form-label" for="f-pool">Total prize pool <span class="text-muted fw-normal">(optional)</span></label><input class="form-control" id="f-pool" name="prize_pool" value="{{ val('prize_pool') }}" placeholder="e.g. ₹25,000"></div>
+          </div>
+        </div>
+        <p class="text-muted small mb-0" id="nothing-specific" hidden>Nothing extra is needed for this kind of event.</p>
+      </div>
+    </section>
+
+    {# ── 6. Form & extras ── #}
+    <section class="wz-step" data-step="6" aria-labelledby="st6">
+      <div class="panel">
+        <h2 id="st6">Registration form and extras</h2>
+        <div data-hide-for-fest>
+          {% if editing %}
+          {# Editing: the form is changed in the builder only, so there is one place for it (UPG-219) #}
+          <p class="wz-lead">People registering are asked exactly these questions, in this order. Name and email are always asked: the account, ticket and certificate use them.</p>
+          <ol class="mb-2" id="form-outline">
+            {% for q in form_outline.questions %}<li>{{ q.label }}{% if q.required %} <span class="text-muted small">(required)</span>{% endif %}</li>{% endfor %}
+          </ol>
+          {% if form_outline.members %}<p class="text-muted small mb-2">Each team member gives: {{ form_outline.members | join(', ') }}.</p>{% endif %}
+          <p class="mb-3"><a href="/forms/builder/{{ editing.id }}" class="btn btn-outline-primary btn-sm"><i class="fas fa-rectangle-list" aria-hidden="true"></i> Edit the registration form</a> <span class="text-muted small">Questions are added, removed and reordered in the form builder.</span></p>
+          {% else %}
+          {# A new event: this list is the registration form, and nothing else is added (UPG-219) #}
+          <p class="wz-lead">This is the registration form: people are asked exactly these questions, in this order. Name and email are always asked: the account, ticket and certificate use them. You can change the form later in the form builder.</p>
+          <div class="mb-3">
+            <ol class="list-unstyled mb-2" id="fixed-rows">
+              <li class="builder-row field fixed"><span>Full Name</span><span class="text-muted small">Short answer · required · always asked</span></li>
+              <li class="builder-row field fixed"><span>Email Address</span><span class="text-muted small">Email · required · always asked</span></li>
+            </ol>
+            <div id="field-rows"></div>
+            <button type="button" class="btn btn-outline-primary btn-sm" id="field-add"><i class="fas fa-plus" aria-hidden="true"></i> Add a question</button>
+            <div class="mt-2" id="suggest-block" hidden>
+              <span class="text-muted small d-block mb-1">Suggested for this kind of event (added only if you click):</span>
+              <div class="d-flex flex-wrap gap-2" id="suggest-chips"></div>
+            </div>
+            <input type="hidden" name="form_step6" value="1">
+            <input type="hidden" name="form_step6_json" id="form-json" value="{{ val('form_step6_json') }}">
+          </div>
+          <fieldset class="mb-3" id="member-fields">
+            <legend class="form-label">Team members <span class="text-muted fw-normal">(each member gives their name and email)</span></legend>
+            <div class="wz-row">
+              {% for key, label in [('usn', 'Member USN'), ('phone', 'Member phone'), ('jersey_name', 'Member jersey name')] %}
+              {% set chosen = v.get('member_' ~ key) or ('optional' if key == 'usn' else 'off') %}
+              <div><label class="form-label" for="f-member-{{ key }}">{{ label }}</label>
+                <select class="form-select" id="f-member-{{ key }}" name="member_{{ key }}">
+                  {% for opt, text in [('off', "Don't ask"), ('optional', 'Optional'), ('required', 'Required')] %}
+                  <option value="{{ opt }}" {{ 'selected' if chosen == opt }}>{{ text }}</option>
+                  {% endfor %}
+                </select></div>
+              {% endfor %}
+            </div>
+            <p class="text-muted small mb-0">Required applies to the members the team must have; extra members are optional.</p>
+          </fieldset>
+          {% endif %}
+        </div>
+        <div class="wz-row">
+          <div><label class="form-label" for="f-coords">Coordinators' emails <span class="text-muted fw-normal">(comma-separated)</span></label><input class="form-control" id="f-coords" name="coordinators" value="{{ val('coordinators') }}" placeholder="a@snpsu.edu.in, b@snpsu.edu.in"></div>
+          <div><label class="form-label" for="f-phone">Contact phone</label><input class="form-control" type="tel" id="f-phone" name="contact_phone" value="{{ val('contact_phone', profile_phone) }}" placeholder="Shown to participants"></div>
+          <div><label class="form-label" for="f-group">WhatsApp / group link <span class="text-muted fw-normal">(optional)</span></label><input class="form-control" type="url" id="f-group" name="group_link" value="{{ val('group_link') }}" placeholder="https://chat.whatsapp.com/…"></div>
+        </div>
+        <div class="wz-row">
+          <div><label class="form-label" for="f-points">Activity points</label><input class="form-control" type="number" min="0" step="0.5" id="f-points" name="activity_points" value="{{ val('activity_points', '0') }}"></div>
+          <div><label class="form-label" for="f-hours">Activity / volunteer hours</label><input class="form-control" type="number" min="0" step="0.5" id="f-hours" name="activity_hours" value="{{ val('activity_hours', '0') }}"></div>
+        </div>
+        <div class="wz-sub">
+          <h3>Sponsors <span class="text-muted fw-normal fs-6">(optional)</span></h3>
+          <div id="sponsor-rows"></div>
+          <button type="button" class="btn btn-outline-primary btn-sm" id="sponsor-add"><i class="fas fa-plus" aria-hidden="true"></i> Add a sponsor</button>
+          <input type="hidden" name="sponsors_json" id="sponsors-json" value="{{ val('sponsors_json', '[]') }}">
+        </div>
+      </div>
+    </section>
+
+    {# ── 7. Check & save ── #}
+    <section class="wz-step" data-step="7" aria-labelledby="st7">
+      <div class="panel wz-summary">
+        <h2 id="st7">Check and save</h2>
+        <p class="wz-lead">{% if editing %}This saves your changes and takes you back to the review page.{% else %}This saves a <strong>draft</strong>. On the next page you'll see it as participants will, and publish it when you're ready.{% endif %}</p>
+        <dl id="summary"></dl>
+        <div class="wz-actions">
+          <span></span>
+          <button type="submit" class="btn btn-gold btn-lg"><i class="fas fa-floppy-disk" aria-hidden="true"></i> {{ 'Save changes' if editing else 'Save draft and review' }}</button>
+        </div>
+      </div>
+    </section>
+
+    <div class="wz-actions" id="wz-pager" hidden>
+      <button type="button" class="btn btn-secondary" id="wz-back"><i class="fas fa-arrow-left" aria-hidden="true"></i> Back</button>
+      <button type="button" class="btn btn-primary" id="wz-next">Next <i class="fas fa-arrow-right" aria-hidden="true"></i></button>
+    </div>
+  </form>
+</div>
+
+<script type="application/json" id="wz-types">{{ types | tojson }}</script>
+<script type="application/json" id="wz-suggest">{{ suggestions | tojson }}</script>
+<script src="/static/js/pages/spoc__create_event.js"></script>
+{% endblock %}

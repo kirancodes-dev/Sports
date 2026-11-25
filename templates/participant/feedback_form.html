@@ -1,0 +1,76 @@
+{% extends "base_classic.html" %}
+{#- On the app layout and portal design system (UPG-63). -#}
+{% set hide_page_head = true %}
+{% block title %}Event feedback{% endblock %}
+{% block extra_css %}
+<style>
+/* Event feedback (UPG-63) */
+.fb-card { max-width: 600px; margin: 0 auto; }
+.fb-icon { width: 52px; height: 52px; background: var(--brand-gold-100); color: var(--brand-gold-700); border-radius: var(--radius); display: flex; align-items: center; justify-content: center; margin: 0 auto 12px; font-size: 1.3rem; }
+.fb-label { font-size: var(--fs-sm); font-weight: 600; color: var(--text-strong); margin-bottom: 8px; display: block; }
+.stars { display: flex; flex-direction: row-reverse; justify-content: flex-end; gap: 4px; border: 0; padding: 0; margin: 0; }
+.stars input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.stars label { font-size: 2.2rem; line-height: 1; cursor: pointer; color: var(--border-strong); padding: 0 2px; border-radius: var(--radius-xs); }
+.stars input:checked ~ label, .stars label:hover, .stars label:hover ~ label { color: var(--brand-gold); }
+.stars input:focus-visible + label { box-shadow: var(--focus-ring); }
+.tag-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.tag-opt { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.tag-label { padding: 6px 14px; border-radius: var(--radius-pill); font-size: var(--fs-sm); font-weight: 500; border: 1px solid var(--border-strong); background: var(--surface-card); color: var(--text-muted); cursor: pointer; }
+.tag-opt:checked + .tag-label { background: var(--brand-navy); border-color: var(--brand-navy); color: #fff; }
+.tag-opt:focus-visible + .tag-label { box-shadow: var(--focus-ring); }
+</style>
+{% endblock %}
+{% block content %}
+<div class="panel fb-card">
+  <div class="text-center mb-4">
+    <div class="fb-icon" aria-hidden="true"><i class="fas fa-star"></i></div>
+    <h2 class="h4 mb-1">Rate this event</h2>
+    <p class="text-muted mb-0">{{ event.get('title','Event') }} — your feedback helps us improve future events.</p>
+  </div>
+
+  <form method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <!-- Star rating -->
+    <div class="mb-4">
+      <fieldset>
+      <legend class="fb-label">Overall rating</legend>
+      <div class="stars">
+        <input type="radio" name="rating" id="s5" value="5"><label for="s5" title="5 stars"><span aria-hidden="true">★</span><span class="visually-hidden">5 stars</span></label>
+        <input type="radio" name="rating" id="s4" value="4"><label for="s4" title="4 stars"><span aria-hidden="true">★</span><span class="visually-hidden">4 stars</span></label>
+        <input type="radio" name="rating" id="s3" value="3"><label for="s3" title="3 stars"><span aria-hidden="true">★</span><span class="visually-hidden">3 stars</span></label>
+        <input type="radio" name="rating" id="s2" value="2"><label for="s2" title="2 stars"><span aria-hidden="true">★</span><span class="visually-hidden">2 stars</span></label>
+        <input type="radio" name="rating" id="s1" value="1"><label for="s1" title="1 star"><span aria-hidden="true">★</span><span class="visually-hidden">1 star</span></label>
+      </div>
+      </fieldset>
+    </div>
+
+    <!-- Quick tags -->
+    <div class="mb-4">
+      <span class="fb-label">What stood out? <span class="text-subtle fw-normal">(select all that apply)</span></span>
+      <div class="tag-grid">
+        {% for tag in ['Well organised', 'Great venue', 'Excellent judges', 'Clear rules',
+                       'Good problem statement', 'Inspiring', 'Needs improvement',
+                       'Would attend again', 'Certificate was great'] %}
+        <input type="checkbox" name="tags" id="tag-{{ loop.index }}"
+               value="{{ tag }}" class="tag-opt">
+        <label for="tag-{{ loop.index }}" class="tag-label">{{ tag }}</label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Comments -->
+    <div class="mb-4">
+      <label class="fb-label" for="fb-comments">Comments <span class="text-subtle fw-normal">(optional)</span></label>
+      <textarea id="fb-comments" name="comments" class="form-control" rows="3"
+                placeholder="Share your experience..."></textarea>
+    </div>
+
+    <button type="submit" class="btn btn-gold btn-lg w-100">
+      <i class="fas fa-paper-plane" aria-hidden="true"></i> Submit feedback
+    </button>
+  </form>
+</div>
+
+<div class="text-center mt-3"><a href="/participant/dashboard" class="btn btn-link"><i class="fas fa-arrow-left" aria-hidden="true"></i> Back to dashboard</a></div>
+{% endblock %}

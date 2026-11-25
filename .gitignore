@@ -1,0 +1,82 @@
+# Secrets — NEVER commit (tests/test_repo_hygiene.py and CI enforce this)
+.env*
+!.env.example
+serviceAccountKey.json
+service-account*.json
+*.pem
+*.key
+*.keystore
+google-services.json
+
+# Python
+__pycache__/
+*.pyc
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# Flask
+instance/
+flask_session/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Logs & local DBs
+*.log
+*.sqlite*
+*.db
+
+# Firebase Data Connect emulator output (local Postgres data + generated schema)
+dataconnect/.dataconnect/
+
+# Scratch & Local Env Configurations
+scratch/env-vars.yaml
+scratch/env-vars.yml
+
+# Node modules
+node_modules/
+dist/
+
+# Source backups & zips
+saptha-event-portal-source*/
+*.zip
+
+
+
+# Generated documents (generate_*.py output) — never track, never serve from static/
+static/reports/
+reports/*.pdf
+reports/*.docx
+reports/snpsu-logo-bw.png
+
+# Database dumps hold everyone's personal data — never commit them (UPG-21)
+*.dump
+*.sql
+*.sql.gz
+*.backup
+
+SapthaEvent_Demo_Guide.pdf
+static/uploads/
+
+SapthaEvent_Demo_Guide.pdf
+static/uploads/
+
+# Generated documents, uploads and local backups (UPG-89): never committed
+*.pdf
+*.docx
+*.pptx
+static/uploads/
+test_event_id.txt
+
+# Integrity-checked copies of the CDN files, for browser tests (tests/headless.py)
+tests/.cdn-cache/

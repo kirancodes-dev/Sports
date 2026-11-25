@@ -1,0 +1,26 @@
+{% extends "layouts/status.html" %}
+{#- Certificate verification failure on the status layout (UPG-63). -#}
+{% set status_tone = 'danger' %}
+{% set status_icon = 'fa-circle-xmark' %}
+{% block title %}Verification Failed{% endblock %}
+{% block status %}
+  <h1>Verification Failed</h1>
+  <p>This certificate could not be verified.</p>
+  <p class="small">
+    {% if reason == 'Absent' %}
+      This registration exists but the participant was marked <strong>Absent</strong>
+      at the event. Certificates are only issued to participants who attended.
+    {% else %}
+      The certificate ID <code>{{ reg_id }}</code> was not found in our records.
+      This certificate may be invalid or forged.
+    {% endif %}
+  </p>
+  <div class="alert alert-danger small mb-0" role="status">
+    <i class="fas fa-exclamation-triangle me-1" aria-hidden="true"></i>
+    Not a valid SapthaEvent certificate
+  </div>
+  <div class="status-actions">
+    <a href="/verify" class="btn btn-primary"><i class="fas fa-shield-halved" aria-hidden="true"></i> Check another ID</a>
+    <a href="/" class="btn btn-secondary"><i class="fas fa-home" aria-hidden="true"></i> Back to the portal</a>
+  </div>
+{% endblock %}

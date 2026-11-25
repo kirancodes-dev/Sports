@@ -1,0 +1,10 @@
+{% extends "layouts/status.html" %}
+{% set status_tone = 'info' %}
+{% set status_icon = 'fa-lock' %}
+{% block title %}Self check-in disabled{% endblock %}
+{% block status %}
+  <h1>Self check-in is off</h1>
+  <p>Self check-in is not enabled for <strong>{{ event.title }}</strong>.</p>
+  <p class="small">Please show your QR ticket to the coordinator at the entry desk.</p>
+  <div class="status-actions"><a href="/" class="btn btn-primary">Back to the portal</a></div>
+{% endblock %}

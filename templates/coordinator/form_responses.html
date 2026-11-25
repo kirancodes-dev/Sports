@@ -1,0 +1,98 @@
+{% extends "base_classic.html" %}
+{#- On the app layout and portal design system (UPG-63). -#}
+{% import 'includes/ui.html' as ui with context %}
+{% block title %}Responses | {{ event.title }}{% endblock %}
+{% block page_title %}Form responses{% endblock %}
+{% block page_sub %}{{ event.title }}{% endblock %}
+{% block page_actions %}
+<a href="/coordinator/dashboard" class="btn btn-secondary"><i class="fas fa-arrow-left" aria-hidden="true"></i> Dashboard</a>
+{% if can_edit_form %}<a href="/forms/builder/{{ event.id }}" class="btn btn-outline-primary"><i class="fas fa-edit" aria-hidden="true"></i> Edit form</a>{% endif %}
+<a data-pick-columns href="/forms/responses/export/{{ event.id }}" class="btn btn-primary"><i class="fas fa-download" aria-hidden="true"></i> Export CSV</a>
+{% endblock %}
+{% block extra_css %}
+<style>
+/* Form responses (UPG-63) */
+.resp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.resp-filter { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+.resp-filter .resp-search { flex: 1; min-width: 200px; }
+.answer-cell { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.resp-num, .resp-time { font-size: var(--fs-xs); color: var(--text-muted); white-space: nowrap; }
+.resp-link { font-family: var(--font-mono); font-size: var(--fs-sm); background: var(--surface-sunken); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 12px; display: inline-block; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="resp-stats">
+  {{ ui.stat_tile('fa-inbox', total, 'Total responses') }}
+  {{ ui.stat_tile('fa-list-check', schema.fields|length, 'Form fields') }}
+  {{ ui.stat_tile('fa-shapes', (schema.form_type|capitalize if schema.form_type else 'Simple'), 'Form type') }}
+  {{ ui.stat_tile('fa-users', event.get('registration_count', 0), 'Registrations') }}
+</div>
+
+<!-- Search: runs on the server, kept in the URL with the page (UPG-19) -->
+<form method="get" action="{{ request.path }}" class="panel resp-filter" role="search">
+  <div class="resp-search">
+    <label for="search-input" class="visually-hidden">Search by name or email</label>
+    <input type="search" id="search-input" name="q" value="{{ page.q }}" placeholder="Search by name or email…" class="form-control">
+  </div>
+  <button type="submit" class="btn btn-outline-primary">Search</button>
+  {% if page.q %}<a href="{{ request.path }}" class="btn btn-link">Clear</a>{% endif %}
+</form>
+
+{% if submissions %}
+<div class="table-card">
+  <div class="table-responsive">
+    <table class="table mb-0" id="responses-table">
+      <thead>
+        <tr>
+          <th scope="col">#</th>
+          <th scope="col">Submitted at</th>
+          <th scope="col">Name</th>
+          <th scope="col">Email</th>
+          {% for field in schema.fields %}
+            {% if field.id not in ('full_name','name','email') and field.type not in ('heading','paragraph','divider') %}
+            <th scope="col">{{ field.label }}</th>
+            {% endif %}
+          {% endfor %}
+          <th scope="col"><span class="visually-hidden">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for sub in submissions %}
+        <tr>
+          <td class="resp-num">{{ page.first_index + loop.index0 }}</td>
+          <td class="resp-time">{{ sub.get('submitted_at','')[:16] | replace('T',' ') }}</td>
+          <td class="fw-semibold">{{ sub.get('name','—') }}</td>
+          <td>{{ sub.get('email','—') }}</td>
+          {% for field in schema.fields %}
+            {% if field.id not in ('full_name','name','email') and field.type not in ('heading','paragraph','divider') %}
+            <td class="answer-cell" title="{{ sub.get('answers',{}).get(field.id, '') }}">
+              {% set val = sub.get('answers',{}).get(field.id, '') %}
+              {% if val is iterable and val is not string %}
+                {% for v in val %}<span class="se-badge se-badge--info me-1">{{ v }}</span>{% endfor %}
+              {% else %}
+                {{ val or '—' }}
+              {% endif %}
+            </td>
+            {% endif %}
+          {% endfor %}
+          <td>
+            <a href="/ticket/{{ sub.get('reg_id','') }}" class="btn btn-outline-primary btn-sm" title="View ticket" aria-label="View ticket for {{ sub.get('name','this response') }}">
+              <i class="fas fa-ticket-alt" aria-hidden="true"></i>
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% include "includes/pagination.html" %}
+
+{% else %}
+<div class="panel">
+  {% call ui.empty_state('fa-inbox', ('No responses match “' ~ page.q ~ '”') if page.q else 'No responses yet', 'Share the registration link to start collecting submissions.') %}
+    <div class="resp-link mt-2">/forms/register/{{ event.id }}</div>
+  {% endcall %}
+</div>
+{% endif %}
+{% endblock %}

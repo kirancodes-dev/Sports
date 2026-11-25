@@ -1,0 +1,75 @@
+{% extends "base_classic.html" %}
+{% block title %}Terms of Service{% endblock %}
+{% block page_title %}Terms of service{% endblock %}
+{% block page_sub %}Last updated: May 2026 &middot; Sapthagiri NPS University — SapthaEvent Portal{% endblock %}
+{% block content %}
+<article class="panel prose">
+
+  <h2>1. Acceptance</h2>
+  <p>
+    By accessing or using SapthaEvent, you agree to be bound by these Terms.
+    If you disagree, you may not use the portal. These Terms are governed by
+    the laws of India, and the courts of Bengaluru, Karnataka shall have exclusive jurisdiction.
+  </p>
+
+  <h2>2. Eligibility</h2>
+  <p>
+    The portal is primarily for students and staff of Sapthagiri NPS University.
+    External participants may register for open events only. You must be at least 16 years of age.
+  </p>
+
+  <h2>3. Registrations & Payments</h2>
+  <ul>
+    <li>Registration is confirmed only after payment (for paid events) is verified.</li>
+    <li>Entry fees are <strong>non-refundable</strong> unless the event is cancelled by the organiser.</li>
+    <li>If an event is cancelled, a full refund will be processed within 7 business days.</li>
+    <li>Duplicate registrations will be cancelled without refund.</li>
+  </ul>
+
+  <h2>4. Certificates</h2>
+  <p>
+    Certificates are issued only to participants who attended the event (marked Present).
+    Falsifying attendance constitutes academic misconduct and may result in disciplinary action.
+  </p>
+
+  <h2>5. Prohibited Conduct</h2>
+  <ul>
+    <li>Sharing login credentials with others</li>
+    <li>Registering on behalf of another person without their consent</li>
+    <li>Submitting false or misleading information</li>
+    <li>Attempting to exploit, hack, or disrupt the portal</li>
+    <li>Using the portal for commercial solicitation</li>
+  </ul>
+
+  <h2>6. Intellectual Property</h2>
+  <p>
+    All portal content, including event designs, certificates, and AI-generated reports,
+    belongs to Sapthagiri NPS University. You may not reproduce or distribute this content
+    without written permission.
+  </p>
+
+  <h2>7. Limitation of Liability</h2>
+  <p>
+    The university and the SapthaEvent team are not liable for any indirect, incidental, or
+    consequential damages arising from your use of the portal, including but not limited to
+    loss of data or inability to register for an event due to technical issues.
+  </p>
+
+  <h2>8. Changes to Terms</h2>
+  <p>
+    We may update these Terms at any time. Continued use of the portal after changes
+    constitutes acceptance of the updated Terms.
+  </p>
+
+  <h2>9. Contact</h2>
+  <p>
+    {% if support_email %}<strong>Email:</strong> <a href="mailto:{{ support_email }}">{{ support_email }}</a><br>{% endif %}
+    <strong>Address:</strong> Sapthagiri NPS University, Hesarghatta Main Rd, Bengaluru - 560090
+  </p>
+
+  <div class="d-flex flex-wrap gap-2 justify-content-center mt-5 pt-4 border-top">
+    <a href="/privacy" class="btn btn-outline-primary btn-sm">Privacy Policy</a>
+    <a href="/" class="btn btn-secondary btn-sm">Back to home</a>
+  </div>
+</article>
+{% endblock %}

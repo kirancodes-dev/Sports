@@ -1,0 +1,142 @@
+{% extends "base_classic.html" %}
+{#- Public fixtures and standings (UPG-63): app layout; it had no stylesheet before. -#}
+{% set app_active = 'events' %}
+{% block robots %}index, follow{% endblock %}
+{% block title %}Fixtures &amp; standings — {{ event.title }}{% endblock %}
+{% block breadcrumbs %}
+<ol class="crumbs" aria-label="Breadcrumb">
+  <li><a href="/events">Events</a></li>
+  <li><a href="/event/{{ event.id }}">{{ event.title }}</a></li>
+  <li><span aria-current="page">Fixtures</span></li>
+</ol>
+{% endblock %}
+{% block page_title %}{{ event.title }}{% endblock %}
+{% block page_sub %}<i class="fas fa-calendar me-1" aria-hidden="true"></i> {{ event.date or 'Date to be announced' }}{% if event.venue %} · <i class="fas fa-map-marker-alt me-1" aria-hidden="true"></i> {{ event.venue }}{% endif %}{% endblock %}
+{% block page_actions %}
+  {% if champion %}
+  <span class="se-badge se-badge--gold se-badge--plain fs-6"><i class="fas fa-trophy" aria-hidden="true"></i> Champion: {{ names.get(champion, champion) if names else champion }}</span>
+  {% endif %}
+  {% if t and t.matches %}<a href="/tournament/screen/{{ event.id }}" class="btn btn-outline-primary" data-screen-link><i class="fas fa-tv" aria-hidden="true"></i> Big screen</a>{% endif %}
+  <a href="/event/{{ event.id }}" class="btn btn-secondary"><i class="fas fa-arrow-left" aria-hidden="true"></i> Event details</a>
+{% endblock %}
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/live_match.css">
+{% include "includes/og_sports.html" %}
+{% endblock %}
+{% block content %}
+{% from "includes/players.html" import player_name, search_box %}
+{#- Where the big screen's QR code lands: the matches being played first (UPG-402) #}
+{% set playing = (t.matches or [])|selectattr('id', 'in', live)|list if t and live else [] %}
+{% if playing %}
+<div class="panel mb-3" data-live-now>
+  <h2 class="h5 mb-2"><span class="live-dot">LIVE</span> Being played now</h2>
+  {#- The live boards first: the score and each team's players in and out (UPG-421) #}
+  {% for m in playing %}
+  {% set st = (live_states or {}).get(m.id) %}
+  <div class="live-mini" data-live-board data-live-mini="{{ m.id }}" data-url="/tournament/live/{{ event.id }}/{{ m.id }}/state"
+       data-clock="{{ st.clock if st else 0 }}" data-running="{{ 'true' if st and st.running else 'false' }}"
+       data-phase="{{ st.phase if st else 'not_started' }}">
+    <div class="live-mini__row">
+      {% for side in ('home', 'away') %}
+      {% if side == 'away' %}
+      <div class="live-mini__middle"><div data-phase-name>{{ st.phase_name if st else '' }}</div><div class="live-mini__clock" data-clock-text>{% if st %}{{ '%02d:%02d' % (st.clock // 60, st.clock % 60) }}{% endif %}</div></div>
+      {% endif %}
+      <div class="live-mini__team">
+        {% if logos.get(m[side]) %}<img src="{{ logos[m[side]] }}" alt="" class="team-logo" width="40" height="40">{% endif %}
+        <div class="live-mini__name">{{ names.get(m[side], 'TBD') }}</div>
+        <div class="live-mini__score" data-score="{{ side }}">{{ st[side].total if st else 0 }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="mat-host" data-mat-boxes-host>{% include "includes/live_mat_boxes.html" %}</div>
+    <a href="/tournament/live/{{ event.id }}/{{ m.id }}" class="btn btn-primary w-100 mt-2" data-live-now-link>
+      {{ names.get(m.home, 'TBD') }} v {{ names.get(m.away, 'TBD') }} · Watch the score live
+    </a>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{#- Which team is in which pool; pick a pool to see only its table and matches (UPG-407) #}
+{% if pool_teams and t and t.matches %}
+<div class="panel mb-3" data-pool-picker>
+  <h2 class="h5 mb-2">Choose a pool</h2>
+  <nav class="pool-tabs" aria-label="Pools">
+    <a href="/tournament/fixtures/{{ event.id }}" class="btn {{ 'btn-primary' if not pool_view else 'btn-outline-primary' }}"{% if not pool_view %} aria-current="page"{% endif %} data-pool-tab="">All</a>
+    {% for p, _teams in pool_teams %}
+    <a href="/tournament/fixtures/{{ event.id }}?pool={{ p }}" class="btn {{ 'btn-primary' if pool_view == p else 'btn-outline-primary' }}"{% if pool_view == p %} aria-current="page"{% endif %} data-pool-tab="{{ p }}">Pool {{ p }}</a>
+    {% endfor %}
+  </nav>
+  <div class="pool-teams">
+    {% for p, teams in pool_teams if not pool_view or p == pool_view %}
+    <section class="pool-teams__pool" data-pool-teams="{{ p }}">
+      <h3 class="eyebrow mb-2">Pool {{ p }} teams</h3>
+      <ol class="pool-teams__list">
+        {% for x in teams %}
+        <li>{% if x.logo %}<img src="{{ x.logo }}" alt="" class="team-logo me-1" width="24" height="24">{% endif %}<strong>{{ x.name }}</strong>{% if x.seed %} <span class="text-muted small">{{ p }}{{ x.seed }}</span>{% endif %}</li>
+        {% endfor %}
+      </ol>
+    </section>
+    {% endfor %}
+  </div>
+  {% if pool_view %}<p class="small text-muted mb-0">Showing Pool {{ pool_view }}'s table and matches, the inter-pool round and the playoffs.</p>{% endif %}
+</div>
+{% endif %}
+<div class="panel" id="tables">
+  {% if not t or not t.matches %}
+  <div class="empty-state border-0">
+    <i class="fas fa-medal" aria-hidden="true"></i>
+    <h3>Fixtures not yet generated</h3>
+    <p>Brackets and fixtures appear here once the organisers finalise them.</p>
+  </div>
+  {% else %}
+    {% include "includes/tournament.html" %}
+  {% endif %}
+</div>
+{#- The leaders, from the matches scored live (UPG-352) #}
+{% if raiders or defenders %}
+<div class="row g-3 mt-1" data-player-stats>
+  {% for title, rows, key, badge, badge_key in (('Top raiders', raiders, 'raid', 'Super 10s', 'super_10'), ('Top defenders', defenders, 'tackle', 'High 5s', 'high_5')) %}
+  {% if rows %}
+  <div class="col-md-6">
+    <div class="panel">
+      <h2 class="h5">{{ title }}</h2>
+      <div class="table-responsive"><table class="table table-sm align-middle mb-0">
+        <thead><tr><th>#</th><th>Player</th><th>{{ 'Raid' if key == 'raid' else 'Tackle' }} pts</th><th>Matches</th><th>{{ badge }}</th></tr></thead>
+        <tbody>
+          {% for r in rows %}
+          <tr><td>{{ loop.index }}</td><td>{% if r.jersey %}<span class="jersey-no" data-jersey>#{{ r.jersey }}</span> {% endif %}<strong>{{ player_name(player_links, r.team_id, r.player) }}</strong><div class="small text-muted">{{ r.team }}</div></td><td><strong>{{ r[key] }}</strong></td><td>{{ r.matches }}</td><td>{{ r[badge_key] }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table></div>
+    </div>
+  </div>
+  {% endif %}
+  {% endfor %}
+</div>
+{% endif %}
+{#- Every player's points, team by team (UPG-395) #}
+{% if team_players %}
+<div class="panel mt-3" data-team-players>
+  <h2 class="h5">Every player's points</h2>
+  <p class="small text-muted mb-2">From the matches scored live. A Super 10 is 10 raid points in a match; a High 5 is 5 tackle points.</p>
+  {% for team_name, team_id, rows in team_players %}
+  <details class="mb-2" {% if loop.first %}open{% endif %} data-team-player-list="{{ team_id }}">
+    <summary class="fw-semibold">{% if logos.get(team_id) %}<img src="{{ logos[team_id] }}" alt="" class="team-logo me-1" width="20" height="20">{% endif %}{{ team_name }} <span class="text-muted small">· {{ rows|length }} player{{ '' if rows|length == 1 else 's' }}</span></summary>
+    <div class="table-responsive"><table class="table table-sm align-middle mb-0 mt-1">
+      <thead><tr><th>Player</th><th>Raid</th><th>Tackle</th><th>Total</th><th>Matches</th><th>Super 10s</th><th>High 5s</th></tr></thead>
+      <tbody>
+        {% for r in rows %}
+        <tr><td>{% if r.jersey %}<span class="jersey-no" data-jersey>#{{ r.jersey }}</span> {% endif %}<strong>{{ player_name(player_links, team_id, r.player) }}</strong></td><td>{{ r.raid }}</td><td>{{ r.tackle }}</td><td><strong>{{ r.total }}</strong></td><td>{{ r.matches }}</td><td>{{ r.super_10 }}</td><td>{{ r.high_5 }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table></div>
+  </details>
+  {% endfor %}
+</div>
+{% endif %}
+{#- Look a player up (UPG-424) #}
+<div class="panel mt-3" data-player-search-panel>
+  <h2 class="h6 mb-2">Find a player</h2>
+  {{ search_box('', compact=true) }}
+</div>
+{% endblock %}

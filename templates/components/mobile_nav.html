@@ -1,0 +1,136 @@
+{# ── Mobile Bottom Navigation (styles: global.css §33, UPG-63) ── #}
+{%- set mn_role = session.get('role') -%}
+{%- set mn_path = request.path -%}
+{%- if session.get('user_id') and mn_role in ('ClubSPOC', 'SPOC', 'UnitAdmin', 'EventOrganizer') -%}
+  {%- set mn_links = [('/spoc/dashboard', 'fa-th-large', 'Console', '/spoc/dashboard'), ('/events', 'fa-compass', 'Events', '/events'),
+                      ('/calendar', 'fa-calendar-alt', 'Calendar', '/calendar'), ('/profile/', 'fa-user-circle', 'Profile', '/profile')] -%}
+{%- elif session.get('user_id') and mn_role in ('EventCoordinator', 'Coordinator') -%}
+  {%- set mn_links = [('/coordinator/dashboard', 'fa-th-large', 'Dashboard', '/coordinator/dashboard'), ('/coordinator/scanner', 'fa-qrcode', 'Scanner', '/coordinator/scan'),
+                      ('/calendar', 'fa-calendar-alt', 'Calendar', '/calendar'), ('/profile/', 'fa-user-circle', 'Profile', '/profile')] -%}
+{%- elif session.get('user_id') and mn_role == 'Volunteer' -%}
+  {%- set mn_links = [('/coordinator/scanner', 'fa-qrcode', 'Scanner', '/coordinator/scan'), ('/profile/', 'fa-user-circle', 'Profile', '/profile')] -%}
+{%- elif session.get('user_id') and mn_role == 'Judge' -%}
+  {%- set mn_links = [('/judge/dashboard', 'fa-gavel', 'Judging', '/judge'), ('/calendar', 'fa-calendar-alt', 'Calendar', '/calendar'),
+                      ('/profile/', 'fa-user-circle', 'Profile', '/profile')] -%}
+{%- elif session.get('user_id') and mn_role in ('SuperAdmin', 'Super Admin', 'Admin', 'UniversityAdmin') -%}
+  {%- set mn_links = [('/admin/dashboard', 'fa-th-large', 'Admin', '/admin/dashboard'), ('/admin/events', 'fa-calendar-check', 'Events', '/admin/events'),
+                      ('/admin/users', 'fa-users', 'Users', '/admin/users'), ('/admin/registrations', 'fa-ticket', 'Entries', '/admin/registrations')] -%}
+{%- else -%}
+  {%- set mn_links = none -%}
+{%- endif %}
+<nav class="mobile-nav-bar" aria-label="Mobile navigation">
+{%- if mn_links %}
+  {#- Staff roles: the same workspace links as the app bar (UPG-63) #}
+  {%- for href, icon, label, prefix in mn_links %}
+  <a href="{{ href }}" class="mobile-nav-item"{% if mn_path.startswith(prefix) %} aria-current="page"{% endif %}>
+    <i class="fas {{ icon }}" aria-hidden="true"></i>
+    <span>{{ label }}</span>
+  </a>
+  {%- endfor %}
+{%- else %}
+  <a href="/" class="mobile-nav-item" id="mn-home"{% if request.path == '/' %} aria-current="page"{% endif %}>
+    <i class="fas fa-home" aria-hidden="true"></i>
+    <span>Home</span>
+  </a>
+  <a href="/events" class="mobile-nav-item" id="mn-events"{% if request.path.startswith('/events') %} aria-current="page"{% endif %}>
+    <i class="fas fa-compass" aria-hidden="true"></i>
+    <span>Explore</span>
+  </a>
+  <a href="/participant/dashboard" class="mobile-nav-item" id="mn-tickets"{% if request.path.startswith('/participant') %} aria-current="page"{% endif %}>
+    <i class="fas fa-ticket-alt" aria-hidden="true"></i>
+    <span>Tickets</span>
+  </a>
+  {# UPG-334: was "Results" → /live/streams, a demo page off in production (404) #}
+  <a href="/certificates/mine" class="mobile-nav-item" id="mn-certificates"{% if request.path.startswith('/certificates/mine') %} aria-current="page"{% endif %}>
+    <i class="fas fa-award" aria-hidden="true"></i>
+    <span>Certificates</span>
+  </a>
+
+  {% if session.get('user_id') %}
+    <a href="/profile/" class="mobile-nav-item" id="mn-profile"{% if request.path.startswith('/profile') %} aria-current="page"{% endif %}>
+      <i class="fas fa-user-circle" aria-hidden="true"></i>
+      <span>Profile</span>
+    </a>
+  {% else %}
+    <a href="/login" class="mobile-nav-item" id="mn-login">
+      <i class="fas fa-sign-in-alt" aria-hidden="true"></i>
+      <span>Login</span>
+    </a>
+  {% endif %}
+
+{%- endif %}
+
+  <!-- Install App button — triggers the custom install flow -->
+  <button type="button" class="mobile-nav-item mobile-nav-item--accent" id="mn-install-btn"
+          data-h-click="components/mobile_nav:1" aria-label="Install App">
+    <i class="fas fa-download" aria-hidden="true"></i>
+    <span>Install</span>
+  </button>
+</nav>
+
+<!-- PWA install sheet — Android prompt or iOS / Chrome steps -->
+<div id="pwaInstallModal" class="pwa-sheet-backdrop" data-h-click="components/mobile_nav:2">
+  <div id="pwaModalSheet" class="pwa-sheet" role="dialog" aria-modal="true" aria-labelledby="pwaSheetTitle">
+    <div class="pwa-sheet__handle" aria-hidden="true"></div>
+
+    <div class="pwa-sheet__head">
+      <img loading="lazy" src="/static/app-icon.png" width="52" height="52" alt="">
+      <div>
+        <h3 class="pwa-sheet__title" id="pwaSheetTitle">Install SapthaEvent</h3>
+        <p class="pwa-sheet__sub">Add the portal to your home screen</p>
+      </div>
+      <button type="button" class="pwa-sheet__close" data-h-click="components/mobile_nav:3" aria-label="Close">&times;</button>
+    </div>
+
+    <div class="pwa-sheet__list">
+      <div><i class="fas fa-bolt" aria-hidden="true"></i>Opens instantly, without the browser bar</div>
+      <div><i class="fas fa-bell" aria-hidden="true"></i>Get push alerts for events and results</div>
+      <div><i class="fas fa-lock" aria-hidden="true"></i>Stay signed in for 30 days</div>
+      <div><i class="fas fa-signal" aria-hidden="true"></i>Works on a slow connection</div>
+    </div>
+
+    <!-- Android install (shown when the native prompt is available) -->
+    <div id="pwaAndroidSection">
+      <button type="button" id="pwaAndroidInstallBtn" class="btn btn-gold btn-lg w-100" data-h-click="components/mobile_nav:4">
+        <i class="fas fa-download" aria-hidden="true"></i>Install app now
+      </button>
+    </div>
+
+    <!-- iOS steps (always on iOS; the fallback on Android) -->
+    <div id="pwaIosSection" style="display:none;">
+      <p class="text-subtle small text-center mb-3">Three quick steps:</p>
+      <div class="d-flex flex-column gap-2">
+        <div class="pwa-step">
+          <div class="pwa-step__num">1</div>
+          <div><p><strong>Tap the Share button</strong></p>
+            <small id="iosShareHint">The Share icon at the bottom of Safari</small></div>
+        </div>
+        <div class="pwa-step">
+          <div class="pwa-step__num">2</div>
+          <div><p>Scroll down and tap <strong>“Add to Home Screen”</strong></p></div>
+        </div>
+        <div class="pwa-step">
+          <div class="pwa-step__num">3</div>
+          <div><p>Tap <strong>Add</strong> in the top right</p>
+            <small>The SapthaEvent icon appears on your home screen</small></div>
+        </div>
+      </div>
+
+      <!-- Chrome Android fallback: 3-dot menu -->
+      <div id="pwaChromeFallback" style="display:none;" class="mt-3">
+        <p class="text-subtle small text-center mb-2">Or in Chrome on Android:</p>
+        <div class="pwa-step">
+          <div class="pwa-step__num"><i class="fas fa-ellipsis-v" aria-hidden="true"></i></div>
+          <p>Open the <strong>⋮ menu</strong>, then tap <strong>“Add to Home screen”</strong></p>
+        </div>
+      </div>
+    </div>
+
+    <p class="text-center mt-3 mb-0">
+      <button type="button" class="btn btn-link btn-sm text-subtle" data-h-click="components/mobile_nav:5">Not now</button>
+    </p>
+  </div>
+</div>
+
+<script src="/static/js/pages/components__mobile_nav.js"></script>
+<script src="/static/js/handlers/components__mobile_nav.js"></script>

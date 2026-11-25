@@ -1,0 +1,179 @@
+{% extends "layouts/fullscreen.html" %}
+{#- On the shared document since UPG-23b (full-screen: no footer). -#}
+{% block head %}
+<title>Event Badge | {{ reg.lead_name }}</title>
+{% include "layouts/_bootstrap_css.html" %}
+{% include "layouts/_fontawesome.html" %}
+<link href="/static/css/global.css" rel="stylesheet">
+<style>
+/* Digital event badge (UPG-63): navy card, gold accents, the official logo unaltered */
+body{background:var(--surface-page);display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family: var(--font-heading);padding:24px;}
+
+/* ─── Badge card ─── */
+.badge-card{
+  width:380px;
+  max-width:100%;
+  background:var(--brand-navy);
+  border-radius:var(--radius-xl);
+  overflow:hidden;
+  box-shadow:var(--shadow-lg);
+  position:relative;
+}
+
+/* Decorative circles */
+.badge-card::before{
+  content:'';position:absolute;top:-60px;right:-60px;
+  width:200px;height:200px;border-radius:50%;
+  background:rgba(198,157,103,.08);
+}
+.badge-card::after{
+  content:'';position:absolute;bottom:-40px;left:-40px;
+  width:160px;height:160px;border-radius:50%;
+  background:rgba(255,255,255,.04);
+}
+
+.badge-top{
+  background:var(--brand-navy-900);
+  border-bottom:3px solid var(--brand-gold);
+  padding:12px 20px;
+  display:flex;align-items:center;gap:10px;
+}
+.badge-top img{height:30px;width:auto;object-fit:contain;}
+.badge-top-text{font-size:10px;font-weight:700;color:var(--brand-gold-300);letter-spacing:1.5px;text-transform:uppercase;margin-left:auto;}
+
+.badge-body{padding:28px 28px 24px;position:relative;z-index:1;}
+
+.badge-avatar{
+  width:72px;height:72px;border-radius:50%;
+  background:rgba(198,157,103,.2);border:3px solid var(--brand-gold);
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--font-heading);font-size:28px;font-weight:800;color:var(--brand-gold-300);
+  margin:0 auto 16px;
+}
+
+.badge-name{
+  font-family:var(--font-heading);font-size:22px;font-weight:800;
+  color:#fff;text-align:center;letter-spacing:1px;line-height:1.2;
+  margin-bottom:4px;
+}
+
+.badge-role{
+  text-align:center;font-size:11px;font-weight:700;letter-spacing:2px;
+  text-transform:uppercase;color:var(--brand-gold);margin-bottom:20px;
+}
+
+.badge-divider{height:1px;background:rgba(198,157,103,.25);margin-bottom:18px;}
+
+.badge-event-name{
+  font-family: var(--font-heading);font-size:15px;font-weight:700;
+  color:#fff;text-align:center;margin-bottom:6px;line-height:1.3;
+}
+
+.badge-meta{
+  display:flex;justify-content:center;gap:16px;flex-wrap:wrap;margin-bottom:20px;
+}
+.badge-meta-item{
+  font-size:11.5px;color:rgba(255,255,255,.75);
+  display:flex;align-items:center;gap:5px;
+}
+.badge-meta-item i{color:var(--brand-gold);font-size:10px;}
+
+.badge-id{
+  text-align:center;font-family:monospace;font-size:10.5px;
+  color:rgba(255,255,255,.55);letter-spacing:1px;margin-bottom:0;
+}
+
+.badge-footer{
+  background:rgba(0,0,0,.25);padding:10px 20px;
+  display:flex;align-items:center;justify-content:space-between;
+  position:relative;z-index:1;
+}
+.badge-footer-brand{font-size:10px;color:rgba(255,255,255,.6);letter-spacing:.5px;}
+.badge-status{
+  font-size:10px;font-weight:700;padding:3px 10px;border-radius:100px;
+  background:rgba(34,197,94,.15);color:#4ade80;letter-spacing:.5px;
+  text-transform:uppercase;
+}
+
+.badge-actions{display:flex;gap:10px;margin-top:20px;flex-wrap:wrap;justify-content:center;}
+
+@media print{
+  body{background:white;padding:0;}
+  .badge-actions,.no-print{display:none !important;}
+  .badge-card{box-shadow:none;}
+}
+</style>
+{% endblock %}
+{% block body %}
+
+<div class="badge-card" id="badge-card">
+
+  <!-- Top stripe -->
+  <div class="badge-top">
+    <img loading="eager" src="/static/img/snpsu-logo-reversed.png" alt="Sapthagiri NPS University"
+         data-h-error="participant/badge:1">
+    <span class="badge-top-text">Event badge</span>
+  </div>
+
+  <!-- Main body -->
+  <div class="badge-body">
+
+    <!-- Avatar -->
+    <div class="badge-avatar">
+      {{ reg.get('lead_name', 'P')[0].upper() }}
+    </div>
+
+    <!-- Name -->
+    <div class="badge-name">{{ reg.get('lead_name', 'Participant') }}</div>
+    <div class="badge-role">
+      {% if reg.get('team_name') and reg.team_name != 'Individual' %}
+        {{ reg.team_name }} &nbsp;·&nbsp;
+      {% endif %}
+      Participant
+    </div>
+
+    <div class="badge-divider"></div>
+
+    <!-- Event info -->
+    <div class="badge-event-name">{{ event.get('title', 'Event') }}</div>
+    <div class="badge-meta">
+      {% if event.get('date') %}
+      <div class="badge-meta-item"><i class="fas fa-calendar-alt"></i>{{ event.date }}</div>
+      {% endif %}
+      {% if event.get('venue') %}
+      <div class="badge-meta-item"><i class="fas fa-map-marker-alt"></i>{{ event.venue }}</div>
+      {% endif %}
+      {% if event.get('category') %}
+      <div class="badge-meta-item"><i class="fas fa-tag"></i>{{ event.category }}</div>
+      {% endif %}
+    </div>
+
+    <div class="badge-id">{{ reg.get('reg_id', reg_id) }}</div>
+  </div>
+
+  <!-- Footer -->
+  <div class="badge-footer">
+    <span class="badge-footer-brand">SapthaEvent Portal</span>
+    <span class="badge-status">Registered</span>
+  </div>
+
+</div>
+
+<div class="badge-actions">
+  <button type="button" class="btn btn-primary" data-h-click="participant/badge:2">
+    <i class="fas fa-download" aria-hidden="true"></i> Save / print
+  </button>
+  <a href="/participant/dashboard" class="btn btn-secondary">
+    <i class="fas fa-arrow-left" aria-hidden="true"></i> Dashboard
+  </a>
+</div>
+
+<!-- Share strip -->
+<div style="max-width:400px;margin:16px auto 0;width:100%;" class="no-print">
+  {% set share_title = "I'm participating in " ~ event.get('title','') ~ " at Sapthagiri NPS University! #SapthaEvent #SNPSU" %}
+  {% set share_label = "Share your badge" %}
+  {% include 'includes/share_strip.html' %}
+</div>
+
+{% endblock %}
+{% block handler_scripts %}{{ super() }}<script src="/static/js/handlers/participant__badge.js"></script>{% endblock %}

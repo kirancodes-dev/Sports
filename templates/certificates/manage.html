@@ -1,0 +1,463 @@
+{% extends "base_classic.html" %}
+
+{% block title %}Certificates — {{ event.title }}{% endblock %}
+{#- The event's certificates: signatories, template and preview (UPG-123). -#}
+{% block page_title %}Certificates{% endblock %}
+{% block page_sub %}{{ event.title }}{% endblock %}
+{% block page_actions %}<a href="/spoc/event/{{ event.id }}/review" class="btn btn-secondary"><i class="fas fa-arrow-left" aria-hidden="true"></i> Event</a>{% endblock %}
+
+{% block extra_css %}{% if running %}<meta http-equiv="refresh" content="5">{% endif %}
+<style>
+.cd-stage{position:relative;max-width:100%;border:1px solid #d6dae3;border-radius:6px;overflow:hidden;touch-action:none;user-select:none}
+.cd-stage img{display:block;width:100%;height:auto;pointer-events:none}
+.cd-box{position:absolute;border:2px dashed #2563eb;background:rgba(37,99,235,.08);cursor:move;font-family:"Noto Sans",system-ui,sans-serif;line-height:1.15;white-space:nowrap;overflow:hidden;display:flex;align-items:center}
+.cd-box [data-text]{display:block;width:100%}
+.cd-box[hidden]{display:none}
+.cd-box.is-active{border-color:#dc2626;background:rgba(220,38,38,.08)}
+.cd-tag{position:absolute;left:0;top:-1px;font:600 10px/1.4 system-ui,sans-serif;background:#2563eb;color:#fff;padding:0 4px;border-radius:0 0 4px 0}
+.cd-handle{position:absolute;right:-2px;top:0;bottom:0;width:12px;cursor:ew-resize;background:rgba(37,99,235,.5)}
+.cd-qr{position:absolute;width:7.4%;aspect-ratio:1;background:repeating-linear-gradient(45deg,#333 0 4px,#fff 4px 8px);border:2px solid #fff;outline:1px solid #333}
+.cd-qr .cd-handle{display:none}
+.cd-qr.is-placed{cursor:move;touch-action:none}
+.cd-qr.is-placed .cd-handle{display:block;top:auto;left:auto;right:-6px;bottom:-6px;width:14px;height:14px;border-radius:50%;cursor:nwse-resize;background:#2563eb;border:2px solid #fff}
+.cd-qr.is-active{outline:2px solid #dc2626}
+.cd-fields fieldset{border:1px solid #e3e6ee;border-radius:6px;padding:.5rem .75rem;margin-bottom:.75rem}
+.cd-fields legend{font-size:.95rem;font-weight:600;float:none;width:auto;padding:0 .25rem;margin:0}
+.cd-fields .form-control,.cd-fields .form-select{min-width:0}
+</style>{% endblock %}
+
+{% block content %}
+{% if not ready and not design %}
+<div class="callout callout--warning mb-3" role="status">{{ missing }}</div>
+{% elif not ready %}
+<div class="callout callout--info mb-3" role="status">Your own design is used for every {{ design_type }}; it needs no signatory.
+    Winner, runner-up, merit and other certificates use the built-in template and still need a signatory with a signature.</div>
+{% endif %}
+
+<div class="card mb-3" id="issue">
+    <div class="card-body">
+        <h2 class="h5">Issue certificates</h2>
+        <p class="text-muted small">{{ people|length }} certificate{{ '' if people|length == 1 else 's' }} owed, {{ issued_count }} issued.
+            Issuing runs in the background and never gives anyone the same certificate twice.</p>
+        {% if can_issue %}
+        <form method="POST" action="/certificates/events/{{ event.id }}/issue" class="d-flex gap-2 align-items-end flex-wrap">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div>
+                <label class="form-label small mb-0" for="issue-which">Which certificates</label>
+                <select class="form-select form-select-sm" id="issue-which" name="which">
+                    <option value="participation" selected>{{ base_title }} certificates only ({{ base_owed }})</option>
+                    <option value="all">Every certificate the event owes ({{ people|length }}): also winners, staff and speakers</option>
+                </select>
+            </div>
+            <button type="submit" class="btn btn-primary" {% if issue_problem %}disabled aria-describedby="issue-problem"{% endif %}>
+                <i class="fas fa-award" aria-hidden="true"></i> Issue certificates</button>
+        </form>
+        {% if issue_problem %}<p class="small text-danger mt-2 mb-0" id="issue-problem">{{ issue_problem }}</p>{% endif %}
+        <form method="POST" action="/certificates/events/{{ event.id }}/participation" class="mt-3 row g-2 align-items-end" data-cert-participation>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="col-md-5">
+                <label class="form-label small" for="cert-who">Participation certificate goes to</label>
+                <select class="form-select form-select-sm" id="cert-who" name="who">
+                    {% for k, label in cert_whos.items() if k != 'submitted' or has_form or cert_who == k %}
+                    <option value="{{ k }}" {% if k == cert_who %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small" for="cert-delivery">Where they get it</label>
+                <select class="form-select form-select-sm" id="cert-delivery" name="delivery">
+                    {% for k, label in cert_deliveries.items() %}
+                    <option value="{{ k }}" {% if k == cert_delivery %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3"><button type="submit" class="btn btn-sm btn-outline-primary">Save</button></div>
+            <p class="small text-muted mb-0">Each person downloads theirs from My certificates{% if has_form %} and the hackathon page{% endif %}, and can share it on LinkedIn.</p>
+        </form>
+        <form method="POST" action="/certificates/events/{{ event.id }}/auto" class="mt-3 d-flex gap-2 align-items-center flex-wrap">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="auto" value="{{ 'off' if auto_issue else 'on' }}">
+            <span class="small">Position certificates when results are published: <strong>{{ 'on' if auto_issue else 'off' }}</strong></span>
+            <button type="submit" class="btn btn-sm btn-outline-secondary">Turn {{ 'off' if auto_issue else 'on' }}</button>
+        </form>
+        {% endif %}
+
+        {% if can_issue and registered %}
+        <form method="POST" action="/certificates/events/{{ event.id }}/award" class="mt-3 row g-2 align-items-end">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="col-md-4">
+                <label class="form-label small" for="award-person">Award to</label>
+                <select class="form-select form-select-sm" id="award-person" name="person" required>
+                    {% for p in registered %}<option value="{{ p.person_key }}">{{ p.name }}{% if p.team %} ({{ p.team }}){% endif %}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small" for="award-kind">Certificate</label>
+                <select class="form-select form-select-sm" id="award-kind" name="kind">
+                    <option value="merit">Merit</option><option value="special_mention">Special mention</option>
+                    <option value="{{ base_kind }}" data-award-base>{{ base_title }}{% if design %} (your design){% endif %}</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small" for="award-note">Wording (optional)</label>
+                <input class="form-control form-control-sm" id="award-note" name="note" maxlength="160" placeholder="for the best design in">
+            </div>
+            <div class="col-md-2"><button type="submit" class="btn btn-sm btn-outline-primary w-100" {% if award_problem %}disabled title="{{ award_problem }}"{% endif %}>Award</button></div>
+        </form>
+        {% endif %}
+
+        {% if runs %}
+        <h3 class="h6 mt-3">Recent runs</h3>
+        <ul class="list-unstyled small mb-0">
+        {% for r in runs %}
+            <li class="mb-2">
+                <strong>{{ r.status|capitalize }}</strong> · {{ r.done }} of {{ r.total }} done, {{ r.failed }} failed
+                <span class="text-muted">({{ r.reason }}, {{ r.started_at[:16]|replace('T', ' ') }} UTC)</span>
+                {% if r.failed and can_issue and r.status not in ('queued', 'running') %}
+                <form method="POST" action="/certificates/events/{{ event.id }}/runs/{{ r.id }}/retry" class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm btn-outline-primary">Retry the failed ones</button>
+                </form>
+                {% endif %}
+                {% if r.errors %}<ul>{% for e in r.errors[:5] %}<li>{{ e.name }} ({{ e.type }}): {{ e.error }}</li>{% endfor %}</ul>{% endif %}
+            </li>
+        {% endfor %}
+        </ul>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card mb-3" id="design">
+    <div class="card-body">
+        <h2 class="h5">Your own certificate design</h2>
+        <p class="text-muted small mb-2">Upload your finished {{ design_type }} with the logos, border and signatures already on it.
+            The app writes each person's name where you place it, plus the certificate number and a small QR code that checks it is real.
+            Winner, runner-up and merit certificates keep the built-in template.</p>
+
+        {% if design %}
+        {% if can_edit %}
+        <p class="small mb-2"><strong>Place the name:</strong> drag the blue box on the design, pull its right edge to change the width,
+            or type the numbers below. Positions are percentages of the page. Then press <em>Save placement</em>.</p>
+        <div class="row g-3">
+            <div class="col-lg-8">
+                <div class="cd-stage" id="cdStage" data-orientation="{{ design.orientation }}">
+                    <img src="/certificates/events/{{ event.id }}/design.jpg" alt="Your uploaded certificate design" id="cdImage">
+                    {% for key in design_fields %}{% set f = design.fields[key] %}
+                    <div class="cd-box" data-field="{{ key }}" {% if not f.on %}hidden{% endif %} role="presentation">
+                        <span class="cd-tag">{{ design_labels[key] }}</span>
+                        <span data-text>{{ sample_values[key] }}</span>
+                        <span class="cd-handle" data-handle aria-hidden="true"></span>
+                    </div>
+                    {% endfor %}
+                    <div class="cd-qr" id="cdQr" title="Certificate number and QR code" data-qr-box><span class="cd-handle" data-handle aria-hidden="true"></span></div>
+                </div>
+                <p class="small text-muted mt-1 mb-0">The preview uses the longest registered name: <strong>{{ sample_values.name }}</strong>.
+                    A name too wide for its box shrinks, then goes onto two lines.</p>
+            </div>
+            <div class="col-lg-4">
+                <form method="POST" action="/certificates/events/{{ event.id }}/design/settings" class="cd-fields" id="cdForm">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    {% for key in design_fields %}{% set f = design.fields[key] %}
+                    <fieldset data-fieldset="{{ key }}">
+                        <legend>{{ design_labels[key] }}</legend>
+                        {% if key != 'name' %}
+                        <div class="form-check mb-1">
+                            <input class="form-check-input" type="checkbox" id="{{ key }}_on" name="{{ key }}_on" value="1" {% if f.on %}checked{% endif %}>
+                            <label class="form-check-label small" for="{{ key }}_on">Print the {{ design_labels[key]|lower }}</label>
+                        </div>
+                        {% endif %}
+                        <div class="row g-1">
+                            <div class="col-4"><label class="form-label small mb-0" for="{{ key }}_y">From top %</label>
+                                <input class="form-control form-control-sm" type="number" step="0.1" min="2" max="98" id="{{ key }}_y" name="{{ key }}_y" value="{{ f.y }}"></div>
+                            <div class="col-4"><label class="form-label small mb-0" for="{{ key }}_x">From left %</label>
+                                <input class="form-control form-control-sm" type="number" step="0.1" min="0" max="95" id="{{ key }}_x" name="{{ key }}_x" value="{{ f.x }}"></div>
+                            <div class="col-4"><label class="form-label small mb-0" for="{{ key }}_w">Width %</label>
+                                <input class="form-control form-control-sm" type="number" step="0.1" min="5" max="100" id="{{ key }}_w" name="{{ key }}_w" value="{{ f.w }}"></div>
+                            <div class="col-4"><label class="form-label small mb-0" for="{{ key }}_size">Size (pt)</label>
+                                <input class="form-control form-control-sm" type="number" step="1" min="6" max="120" id="{{ key }}_size" name="{{ key }}_size" value="{{ f.size|int }}"></div>
+                            <div class="col-4"><label class="form-label small mb-0" for="{{ key }}_color">Colour</label>
+                                <input class="form-control form-control-sm form-control-color w-100" type="color" id="{{ key }}_color" name="{{ key }}_color" value="{{ f.color }}"></div>
+                            <div class="col-4"><label class="form-label small mb-0" for="{{ key }}_align">Align</label>
+                                <select class="form-select form-select-sm" id="{{ key }}_align" name="{{ key }}_align">
+                                    {% for a in ('left', 'center', 'right') %}<option value="{{ a }}" {% if f.align == a %}selected{% endif %}>{{ 'Centre' if a == 'center' else a|capitalize }}</option>{% endfor %}
+                                </select></div>
+                        </div>
+                        <div class="form-check mt-1">
+                            <input class="form-check-input" type="checkbox" id="{{ key }}_bold" name="{{ key }}_bold" value="1" {% if f.bold %}checked{% endif %}>
+                            <label class="form-check-label small" for="{{ key }}_bold">Bold</label>
+                        </div>
+                        <div class="mt-1">
+                            <label class="form-label small mb-0" for="{{ key }}_font">Font</label>
+                            <select class="form-select form-select-sm" id="{{ key }}_font" name="{{ key }}_font" data-font-select>
+                                <optgroup label="Ready fonts">
+                                {% for c in font_choices if not c.own %}<option value="{{ c.key }}" data-family="{{ c.family }}" data-bold="{{ 1 if c.bold_url else 0 }}" data-url="{{ c.url }}" data-bold-url="{{ c.bold_url }}" {% if f.font == c.key %}selected{% endif %}>{{ c.label }}</option>{% endfor %}
+                                </optgroup>
+                                {% if font_choices | selectattr('own') | list %}<optgroup label="Your fonts">
+                                {% for c in font_choices if c.own %}<option value="{{ c.key }}" data-family="{{ c.family }}" data-bold="0" data-url="{{ c.url }}" data-bold-url="" {% if f.font == c.key %}selected{% endif %}>{{ c.label }}</option>{% endfor %}
+                                </optgroup>{% endif %}
+                            </select>
+                        </div>
+                    </fieldset>
+                    {% endfor %}
+                    <fieldset class="mb-2" data-qr-fieldset>
+                        <legend>QR code</legend>
+                        <label class="form-label small mb-0" for="qr_corner">Where it goes</label>
+                        <select class="form-select form-select-sm" id="qr_corner" name="qr_corner">
+                            {% for c, label in (('br', 'Bottom right, with the number'), ('bl', 'Bottom left, with the number'), ('tr', 'Top right, with the number'), ('tl', 'Top left, with the number'), ('place', 'Where I place it (your design’s QR box)')) %}
+                            <option value="{{ c }}" {% if design.qr.corner == c %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                        </select>
+                        <div class="row g-1 mt-1" data-qr-place {% if design.qr.corner != 'place' %}hidden{% endif %}>
+                            <p class="small text-muted mb-1">Drag the dark square onto your design's QR box and pull its corner to fit. Nothing else is printed with it; switch on the certificate number above to print it too.</p>
+                            <div class="col-4"><label class="form-label small mb-0" for="qr_y">From top %</label>
+                                <input class="form-control form-control-sm" type="number" step="0.1" min="0" max="95" id="qr_y" name="qr_y" value="{{ design.qr.y }}"></div>
+                            <div class="col-4"><label class="form-label small mb-0" for="qr_x">From left %</label>
+                                <input class="form-control form-control-sm" type="number" step="0.1" min="0" max="95" id="qr_x" name="qr_x" value="{{ design.qr.x }}"></div>
+                            <div class="col-4"><label class="form-label small mb-0" for="qr_size">Size %</label>
+                                <input class="form-control form-control-sm" type="number" step="0.1" min="5" max="30" id="qr_size" name="qr_size" value="{{ design.qr.size }}"></div>
+                        </div>
+                    </fieldset>
+                    <button type="submit" class="btn btn-primary w-100">Save placement</button>
+                </form>
+            </div>
+        </div>
+        <div class="mt-3" id="design-fonts">
+            <h3 class="h6">Your own fonts</h3>
+            <p class="small text-muted mb-2">To print names in the same lettering as your design, upload the font it uses
+                (a <strong>.ttf</strong> file from your designer or the font's website), pick it in a box's <em>Font</em> list,
+                then press <em>Save placement</em>. A letter the font doesn't have prints in Noto Sans; an uploaded font has no separate bold,
+                so upload its bold file too if you need one. Up to {{ max_fonts }} fonts.</p>
+            {% if design.fonts %}
+            <ul class="list-unstyled small mb-2">
+            {% for f in design.fonts %}
+                <li class="d-flex align-items-center gap-2 mb-1">
+                    <span style="font-family:'cert-{{ f.id }}',sans-serif;font-size:1.1rem">{{ f.name }}</span>
+                    <form method="POST" action="/certificates/events/{{ event.id }}/design/fonts/{{ f.id }}/delete" class="d-inline">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm btn-link text-danger p-0">Remove</button>
+                    </form>
+                </li>
+            {% endfor %}
+            </ul>
+            {% endif %}
+            {% if design.fonts | length < max_fonts %}
+            <form method="POST" action="/certificates/events/{{ event.id }}/design/fonts" enctype="multipart/form-data" class="d-flex gap-2 flex-wrap align-items-end">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div>
+                    <label class="form-label small mb-0" for="font-file">Font file (.ttf, up to 5 MB)</label>
+                    <input class="form-control form-control-sm" type="file" id="font-file" name="font" accept=".ttf,.otf,font/ttf,font/otf" required>
+                </div>
+                <button type="submit" class="btn btn-sm btn-outline-primary">Upload font</button>
+            </form>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <h3 class="h6 mt-3">How it prints</h3>
+        <img src="/certificates/events/{{ event.id }}/preview.png" alt="Preview of the certificate on your design with the longest registered name" class="img-fluid border rounded" loading="lazy" id="cdPreview">
+
+        {% if can_edit %}
+        <div class="d-flex gap-2 flex-wrap align-items-end mt-3">
+            <form method="POST" action="/certificates/events/{{ event.id }}/design" enctype="multipart/form-data" class="d-flex gap-2 flex-wrap align-items-end">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div>
+                    <label class="form-label small" for="design-replace">Replace the design (your placement is kept)</label>
+                    <input class="form-control form-control-sm" type="file" id="design-replace" name="design" accept="image/png,image/jpeg,application/pdf" required>
+                </div>
+                <button type="submit" class="btn btn-sm btn-outline-primary">Upload</button>
+            </form>
+            <form method="POST" action="/certificates/events/{{ event.id }}/design/delete">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-sm btn-outline-danger">Stop using my design</button>
+            </form>
+        </div>
+        {% endif %}
+
+        {% elif can_edit %}
+        <form method="POST" action="/certificates/events/{{ event.id }}/design" enctype="multipart/form-data" class="row g-2 align-items-end">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="col-md-8">
+                <label class="form-label" for="design-file">Design (PNG, JPG or a one-page PDF; A4 landscape or portrait; up to {{ design_max_mb }} MB; best {{ design_best[0] }} × {{ design_best[1] }} px)</label>
+                <input class="form-control" type="file" id="design-file" name="design" accept="image/png,image/jpeg,application/pdf" required>
+            </div>
+            <div class="col-md-4"><button type="submit" class="btn btn-primary w-100"><i class="fas fa-upload" aria-hidden="true"></i> Upload design</button></div>
+        </form>
+        {% else %}
+        <p class="text-muted mb-0">This event uses the built-in template.</p>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card mb-3" id="signatories">
+    <div class="card-body">
+        <h2 class="h5">Certificate signatories</h2>
+        <p class="text-muted small">Up to {{ max_signatories }}, shown left to right on every certificate of this event.
+            Changes apply to certificates issued from now on; ones already issued keep their signatures.</p>
+
+        {% if signatories %}
+        <form method="POST" action="/certificates/events/{{ event.id }}/signatories/order">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="table-responsive">
+            <table class="table align-middle">
+                <thead><tr><th scope="col">Order</th><th scope="col">Signatory</th><th scope="col">Signature</th>{% if can_edit %}<th scope="col"><span class="visually-hidden">Remove</span></th>{% endif %}</tr></thead>
+                <tbody>
+                {% for s in signatories %}
+                <tr>
+                    <td style="width:90px">
+                        <label for="order-{{ s.id }}" class="visually-hidden">Place of {{ s.name }}</label>
+                        <input type="number" min="1" max="{{ max_signatories }}" class="form-control form-control-sm" id="order-{{ s.id }}"
+                               name="order_{{ s.id }}" value="{{ s.order }}" {% if not can_edit %}disabled{% endif %}>
+                    </td>
+                    <td><strong>{{ s.name }}</strong><br><span class="text-muted small">{{ s.title }}</span></td>
+                    <td>{% if s.image_key %}<img src="/certificates/events/{{ event.id }}/signatories/{{ s.id }}/image" alt="Signature of {{ s.name }}" style="max-height:48px;max-width:180px" loading="lazy">{% else %}<span class="text-muted">No signature</span>{% endif %}</td>
+                    {% if can_edit %}
+                    <td class="text-end">
+                        <button type="submit" class="btn btn-sm btn-outline-danger" formaction="/certificates/events/{{ event.id }}/signatories/{{ s.id }}/delete">Remove</button>
+                    </td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            </div>
+            {% if can_edit and signatories|length > 1 %}<button type="submit" class="btn btn-sm btn-outline-primary">Save order</button>{% endif %}
+        </form>
+        {% else %}
+        <p class="text-muted">No signatories yet.</p>
+        {% endif %}
+
+        {% if can_edit and signatories|length < max_signatories %}
+        <form method="POST" action="/certificates/events/{{ event.id }}/signatories" enctype="multipart/form-data" class="row g-2 align-items-end mt-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="col-md-3">
+                <label class="form-label" for="sig-name">Name</label>
+                <input class="form-control" id="sig-name" name="name" required maxlength="120" placeholder="Dr. A. Kumar">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" for="sig-title">Title</label>
+                <input class="form-control" id="sig-title" name="title" required maxlength="160" placeholder="Principal">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label" for="sig-file">Signature (PNG or JPG, up to 1 MB, white or transparent background)</label>
+                <input class="form-control" type="file" id="sig-file" name="signature" accept="image/png,image/jpeg" required>
+            </div>
+            <div class="col-md-2"><button type="submit" class="btn btn-primary w-100">Add</button></div>
+        </form>
+        {% endif %}
+
+        {% if can_edit and copy_sources %}
+        <form method="POST" action="/certificates/events/{{ event.id }}/signatories/copy" class="d-flex gap-2 flex-wrap align-items-end mt-3">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div>
+                <label class="form-label" for="copy-source">Copy signatories from one of your events</label>
+                <select class="form-select" id="copy-source" name="source_event_id">
+                    {% for e in copy_sources %}<option value="{{ e.id }}">{{ e.title }} ({{ e.date }}, {{ e.count }})</option>{% endfor %}
+                </select>
+            </div>
+            <button type="submit" class="btn btn-outline-primary">Copy</button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card mb-3" id="template">
+    <div class="card-body">
+        <h2 class="h5">{% if design %}Built-in template (for winner, merit and other certificates){% else %}Template and preview{% endif %}</h2>
+        {% if can_edit %}
+        <form method="POST" action="/certificates/events/{{ event.id }}/style" class="d-flex gap-2 flex-wrap align-items-end mb-3">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div>
+                <label class="form-label" for="cert-style">Template</label>
+                <select class="form-select" id="cert-style" name="style">
+                    {% for s in styles %}<option value="{{ s }}" {% if s == style %}selected{% endif %}>{{ s|capitalize }}</option>{% endfor %}
+                </select>
+            </div>
+            <button type="submit" class="btn btn-outline-primary">Save template</button>
+        </form>
+        {% endif %}
+        <img src="/certificates/events/{{ event.id }}/preview.png{% if design %}?type=merit{% endif %}" alt="Preview of this event's certificate with sample data" class="img-fluid border rounded" loading="lazy">
+    </div>
+</div>
+
+{% if corrections %}
+<div class="card mb-3" id="corrections">
+    <div class="card-body">
+        <h2 class="h5">Name corrections asked for</h2>
+        <ul class="list-unstyled mb-0">
+        {% for r in corrections %}
+            <li class="mb-3">
+                <code>{{ r.number }}</code>: <strong>{{ r.old_name }}</strong> → <strong>{{ r.new_name }}</strong>
+                {% if r.reason %}<br><span class="small text-muted">{{ r.reason }}</span>{% endif %}
+                {% if can_issue %}
+                <div class="d-flex gap-2 mt-1 flex-wrap">
+                    <form method="POST" action="/certificates/events/{{ event.id }}/corrections/{{ r.id }}/approve">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm btn-primary">Approve (issue version 2)</button>
+                    </form>
+                    <form method="POST" action="/certificates/events/{{ event.id }}/corrections/{{ r.id }}/reject">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm btn-outline-secondary">Reject</button>
+                    </form>
+                </div>
+                {% endif %}
+            </li>
+        {% endfor %}
+        </ul>
+    </div>
+</div>
+{% endif %}
+
+<div class="card mb-3" id="people">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <h2 class="h5 mb-0">Who gets which certificate</h2>
+            <a href="/certificates/events/{{ event.id }}/list" class="btn btn-sm btn-outline-primary">All issued certificates, search and export</a>
+            <form method="POST" action="/certificates/events/{{ event.id }}/check_files">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-sm btn-outline-secondary">Check the stored files</button>
+            </form>
+        </div>
+        {% if people or others %}
+        <div class="table-responsive mt-2">
+        <table class="table table-sm align-middle">
+            <thead><tr><th scope="col">Name</th><th scope="col">Certificate</th><th scope="col">Number</th><th scope="col">Issued</th></tr></thead>
+            <tbody>
+            {% for p in people %}
+            <tr>
+                <td>{{ p.name }}{% if p.team %}<br><span class="text-muted small">{{ p.team }}</span>{% endif %}</td>
+                <td>{{ p.type_title }}{% if p.position %} ({{ p.position }}){% endif %}</td>
+                <td>{% if p.cert %}<code>{{ p.cert.number }}</code>{% if p.cert.status == 'revoked' %} <span class="badge text-bg-danger">Revoked</span>{% endif %}{% else %}<span class="text-muted">Not yet</span>{% endif %}</td>
+                <td>{% if p.cert %}{{ p.cert.issued_at.strftime('%d %b %Y') if p.cert.issued_at else '' }}
+                    {% if can_issue and p.cert.status == 'valid' %}
+                    <details class="mt-1"><summary class="small">Revoke</summary>
+                        <form method="POST" action="/certificates/events/{{ event.id }}/revoke" class="mt-1">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="number" value="{{ p.cert.number }}">
+                            <label class="form-label small" for="revoke-{{ p.cert.number }}">Reason</label>
+                            <input class="form-control form-control-sm" id="revoke-{{ p.cert.number }}" name="reason" required maxlength="500">
+                            <button type="submit" class="btn btn-sm btn-outline-danger mt-1">Revoke certificate</button>
+                        </form>
+                    </details>
+                    {% endif %}
+                    {% elif can_issue and not issue_problem and not p.blocked %}
+                    <form method="POST" action="/certificates/events/{{ event.id }}/issue_one">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="pair" value="{{ p.pair }}">
+                        <button type="submit" class="btn btn-sm btn-outline-primary">Issue</button>
+                    </form>{% endif %}</td>
+            </tr>
+            {% endfor %}
+            {% for c in others %}
+            <tr>
+                <td>{{ c.name }}</td><td>{{ c.type_title }}</td><td><code>{{ c.number }}</code></td>
+                <td>{{ c.issued_at.strftime('%d %b %Y') if c.issued_at else '' }} <span class="text-muted small">(no longer owed)</span></td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% else %}
+        <p class="text-muted mt-2 mb-0">Nobody is owed a certificate yet: participants need to be marked Present.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}<script src="/static/js/pages/certificates__design.js"></script>{% endblock %}

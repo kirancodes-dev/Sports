@@ -1,0 +1,224 @@
+{% extends "layouts/fullscreen.html" %}
+{#- On the shared document since UPG-23b (full-screen: no footer). -#}
+{% block head %}
+    <title>Certificate | {{ student_name }}</title>
+    
+    
+    <style>
+        body { 
+            background: #e2e8f0; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            min-height: 100vh; 
+            margin: 0; 
+            font-family: 'Inter', sans-serif; 
+        }
+        
+        .cert-container { 
+            background: white; 
+            width: 1000px; 
+            height: 700px; 
+            padding: 50px; 
+            box-sizing: border-box;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.2); 
+            position: relative; 
+            border: 15px solid #00185e; 
+            outline: 4px solid #c69d67; 
+            outline-offset: -25px; 
+            text-align: center; 
+        }
+
+        .logo-area {
+            font-size: 50px;
+            color: #c69d67;
+            margin-bottom: 10px;
+            margin-top: 10px;
+        }
+
+        .univ-name { 
+            font-family: Georgia, serif; 
+            font-size: 36px; 
+            color: #00185e; 
+            font-weight: 800; 
+            letter-spacing: 2px;
+        }
+        .univ-sub { 
+            color: #c69d67; 
+            font-weight: 600; 
+            letter-spacing: 4px; 
+            margin-bottom: 50px; 
+            font-size: 14px;
+        }
+        
+        .cert-title { 
+            font-family: Georgia, serif; 
+            font-size: 52px; 
+            color: #1e293b; 
+            margin-bottom: 30px; 
+            text-transform: uppercase; 
+        }
+        
+        .presented-to { 
+            font-size: 20px; 
+            color: #64748b; 
+            margin-bottom: 20px; 
+            font-style: italic;
+        }
+        
+        .student-name { 
+            font-family: Georgia, serif; 
+            font-size: 48px; 
+            color: #c69d67; 
+            border-bottom: 2px solid #cbd5e1; 
+            display: inline-block; 
+            padding: 0 50px 10px; 
+            margin-bottom: 30px; 
+            font-weight: 800; 
+        }
+        
+        .cert-body { 
+            font-size: 20px; 
+            color: #475569; 
+            line-height: 1.8; 
+            padding: 0 100px; 
+            margin-bottom: 60px; 
+        }
+        .cert-body strong {
+            color: #00185e;
+            font-size: 24px;
+        }
+        
+        .footer-grid { 
+            display: flex; 
+            justify-content: space-between; 
+            padding: 0 100px; 
+            margin-top: 40px; 
+        }
+        
+        .signature { 
+            border-top: 2px solid #00185e; 
+            width: 220px; 
+            padding-top: 10px; 
+            font-weight: 600; 
+            color: #00185e; 
+            font-family: Georgia, serif;
+            font-size: 18px;
+        }
+
+        /* The floating print button */
+        .print-btn { 
+            position: fixed; 
+            bottom: 40px; 
+            right: 40px; 
+            background: #00185e; 
+            color: white; 
+            padding: 15px 30px; 
+            border-radius: 30px; 
+            font-size: 18px; 
+            font-weight: bold; 
+            cursor: pointer; 
+            border: none; 
+            box-shadow: 0 8px 20px rgba(0,24,94, 0.4); 
+            transition: 0.3s;
+            font-family: 'Inter', sans-serif;
+        }
+        .print-btn:hover {
+            transform: translateY(-5px);
+            background: #0a224a;
+        }
+
+        /* Fits any screen (UPG-132): the certificate scales down from 1000px, long names wrap */
+        body { flex-direction: column; padding: 72px 16px 120px; box-sizing: border-box; }
+        .cert-container { width: min(1000px, 100%); height: auto; min-height: min(700px, 70vw);
+            padding: clamp(20px, 5vw, 50px); border-width: clamp(6px, 1.5vw, 15px);
+            outline-offset: clamp(-25px, -2.5vw, -10px); }
+        .univ-name { font-size: clamp(17px, 3.6vw, 36px); letter-spacing: clamp(0px, .2vw, 2px); }
+        .univ-sub { font-size: clamp(9px, 1.4vw, 14px); letter-spacing: clamp(1px, .4vw, 4px); margin-bottom: clamp(16px, 5vw, 50px); }
+        .cert-title { font-size: clamp(20px, 5.2vw, 52px); margin-bottom: clamp(12px, 3vw, 30px); overflow-wrap: anywhere; }
+        .presented-to { font-size: clamp(13px, 2vw, 20px); margin-bottom: clamp(8px, 2vw, 20px); }
+        .student-name { font-size: clamp(20px, 4.8vw, 48px); padding: 0 clamp(4px, 5vw, 50px) 10px; max-width: 100%;
+            box-sizing: border-box; overflow-wrap: anywhere; margin-bottom: clamp(12px, 3vw, 30px); }
+        .cert-body { font-size: clamp(13px, 2vw, 20px); padding: 0 clamp(0px, 10vw, 100px); margin-bottom: clamp(20px, 6vw, 60px);
+            overflow-wrap: anywhere; }
+        .cert-body strong { font-size: clamp(15px, 2.4vw, 24px); }
+        .footer-grid { padding: 0 clamp(0px, 10vw, 100px); margin-top: clamp(16px, 4vw, 40px); gap: 16px; flex-wrap: wrap;
+            justify-content: space-around; }
+        .signature { width: min(220px, 40%); font-size: clamp(12px, 1.8vw, 18px); }
+        @media (max-width: 575.98px) {   /* in the page's flow on a phone, so it never covers the share buttons */
+            body { padding-bottom: 32px; }
+            .print-btn { position: static; display: block; margin: 16px auto 0; padding: 12px 20px; font-size: 15px; }
+        }
+
+        /* When the user hits Ctrl+P to print, hide the background and buttons! */
+        @media print {
+            body { background: white; }
+            body { padding: 0; }
+            .cert-container { box-shadow: none; border: 15px solid #00185e; margin: 0; width: 1000px; height: 700px; }
+            .print-btn, .no-print { display: none; }
+            @page { size: landscape; margin: 0mm; }
+        }
+    </style>
+    <link href="/static/css/global.css" rel="stylesheet">
+{% endblock %}
+{% block body %}
+{% include "includes/back_link.html" %}
+
+    {% if issued_image and certificate_number %}
+    {#- The certificate as issued, in the SPOC's own design (UPG-339) -#}
+    <div class="issued-cert no-print" data-issued-certificate style="max-width:1000px;margin:20px auto 0;padding:0 12px;">
+        <img src="/certificates/c/{{ certificate_number }}/png" alt="Your certificate for {{ event.title }}"
+             style="display:block;width:100%;height:auto;border-radius:6px;box-shadow:0 10px 30px rgba(0,0,0,.12);">
+    </div>
+    <p class="no-print" style="text-align:center;margin-top:16px;font-family:'Inter',sans-serif;font-size:15px;">
+      <a class="btn btn-primary" href="/certificates/c/{{ certificate_number }}/pdf">Download the certificate (PDF)</a>
+      <a class="btn btn-outline-primary" href="/certificates/c/{{ certificate_number }}/png">Download as image</a>
+      <br><a href="/verify/{{ certificate_number }}" style="display:inline-block;margin-top:8px;">Verification page</a>
+    </p>
+    {% else %}
+    <div class="cert-container">
+        
+        <div class="univ-name">SAPTHAGIRI NPS UNIVERSITY</div>
+        <div class="univ-sub">OFFICIAL EVENT REGISTRY</div>
+        
+        <div class="cert-title">Certificate of Participation</div>
+        
+        <div class="presented-to">This is proudly presented to</div>
+        
+        <div class="student-name">{{ student_name }}</div>
+        
+        <div class="cert-body">
+            For their active and outstanding participation in the prestigious university event<br>
+            <strong>{{ event.title }}</strong><br>
+            held on {{ event.date }} at {{ venue_label(event) }}.
+        </div>
+        
+        <div class="footer-grid">
+            <div class="signature">Event Coordinator</div>
+            <div class="signature">Division SPOC</div>
+        </div>
+        
+    </div>
+
+    <button class="print-btn" data-h-click="participant/certificate:1">Save as PDF / print</button>
+    {% if certificate_number %}
+    <p class="no-print" style="text-align:center;margin-top:12px;font-family:'Inter',sans-serif;font-size:14px;">
+      <a href="/certificates/c/{{ certificate_number }}/pdf">Download the official certificate (PDF)</a>
+      · <a href="/verify/{{ certificate_number }}">Verification page</a>
+    </p>
+    {% elif certificate_id %}
+    <p class="no-print" style="text-align:center;margin-top:12px;font-family:'Inter',sans-serif;font-size:14px;">
+      <a href="/verify/{{ certificate_id }}/download">Download the official certificate (PDF)</a>
+      · <a href="/verify/{{ certificate_id }}">Verification page</a>
+    </p>
+    {% endif %}
+    {% endif %}
+
+    <div style="max-width:680px;margin:16px auto;padding:0 20px;" class="no-print">
+      {% set share_title = "I earned a certificate for " ~ event.title ~ " at Sapthagiri NPS University! #SapthaEvent #SNPSU" %}
+      {% set share_label = "Share your certificate" %}
+      {% include 'includes/share_strip.html' %}
+    </div>
+
+{% endblock %}
+{% block handler_scripts %}{{ super() }}<script src="/static/js/handlers/participant__certificate.js"></script>{% endblock %}

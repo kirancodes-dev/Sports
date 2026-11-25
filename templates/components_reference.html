@@ -1,0 +1,474 @@
+{% extends "layouts/standalone.html" %}
+{#- On the shared document since UPG-23a. -#}
+{% block html_attrs %}lang="en"{% endblock %}
+{% block head %}
+    <meta name="description" content="SapthaEvent Design System v9 Reference and Interactive Component Showcase">
+    <title>Design System v9 | SapthaEvent Portal</title>
+    <!-- Fonts & Icons -->
+    {% include "layouts/_fontawesome.html" %}
+    <!-- Global Design System -->
+    <link href="/static/css/global.css" rel="stylesheet">
+
+    <style>
+        .doc-header {
+            padding: 3rem 0 2rem;
+            border-bottom: 1px solid var(--glass-border);
+            margin-bottom: 2.5rem;
+            position: relative;
+        }
+        .doc-nav {
+            position: sticky;
+            top: 1rem;
+            z-index: 100;
+            background: var(--glass-bg);
+            backdrop-filter: var(--glass-backdrop);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius);
+            padding: 0.75rem 1.25rem;
+            margin-bottom: 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: var(--shadow-sm);
+        }
+        .doc-nav-links {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        .doc-nav-links a {
+            color: var(--ink-700);
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9rem;
+            padding: 6px 12px;
+            border-radius: var(--radius-xs);
+            transition: all var(--t-fast);
+        }
+        .doc-nav-links a:hover {
+            color: var(--snpsu-gold);
+            background: rgba(198,157,103, 0.1);
+        }
+        .doc-section {
+            margin-bottom: 3.5rem;
+            scroll-margin-top: 5rem;
+        }
+        .doc-section-header {
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--ink-200);
+            padding-bottom: 0.75rem;
+        }
+        [data-theme="dark"] .doc-section-header {
+            border-bottom-color: var(--glass-border);
+        }
+        .doc-section-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--ink-900);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .doc-section-badge {
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: var(--radius-pill);
+            background: rgba(99, 102, 241, 0.15);
+            color: var(--cat-technical);
+        }
+        .swatch-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 1rem;
+        }
+        .swatch-card {
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+            border: 1px solid var(--glass-border);
+            background: var(--bg-card);
+            box-shadow: var(--shadow-xs);
+            cursor: pointer;
+            transition: transform var(--t-fast);
+        }
+        .swatch-card:hover {
+            transform: translateY(-2px);
+        }
+        .swatch-color {
+            height: 70px;
+            width: 100%;
+        }
+        .swatch-info {
+            padding: 10px;
+            font-size: 0.8rem;
+        }
+        .swatch-name {
+            font-weight: 700;
+            color: var(--ink-900);
+        }
+        .swatch-hex {
+            color: var(--ink-500);
+            font-family: monospace;
+        }
+        .demo-grid-2 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 1.5rem;
+        }
+        .demo-grid-3 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+        }
+        .demo-grid-4 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1.25rem;
+        }
+    </style>
+{% endblock %}
+{% block body_attrs %} style="padding-bottom: 4rem;"{% endblock %}
+{% block body %}
+    <!-- Aurora background elements -->
+    <div class="aurora-bg" aria-hidden="true">
+        <div class="aurora-orb"></div>
+        <div class="aurora-orb"></div>
+        <div class="aurora-orb"></div>
+        <div class="aurora-orb"></div>
+    </div>
+    <div class="grid-overlay" aria-hidden="true"></div>
+
+    <a href="#main-content" class="skip-link">Skip to Main Content</a>
+    <div id="a11y-announcer" class="visually-hidden" role="status" aria-live="polite"></div>
+
+    <div class="container" style="max-width: 1200px;">
+        <!-- Header -->
+        <header class="doc-header">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
+                <div>
+                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                        <img loading="eager" src="/static/snpsu-logo.png" alt="Sapthagiri NPS University" style="height: 36px; width: auto;">
+                        <span class="pill-badge-v8 pill-cultural">Design System v9</span>
+                        <span class="pill-badge-v8 pill-technical">WCAG 2.1 AA</span>
+                    </div>
+                    <h1 style="margin: 0; font-size: 2.25rem;">SapthaEvent Component Suite</h1>
+                    <p style="margin-top: 6px; color: var(--ink-600);">Unified tokens, accessible form elements, glassmorphic cards, and interactive widgets.</p>
+                </div>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <a href="/dashboard" class="btn-v8-glass" aria-label="Return to Dashboard">
+                        <i class="fas fa-arrow-left" aria-hidden="true"></i> Return to App
+                    </a>
+                    <button class="btn-v8-gold" data-h-click="components_reference:1" aria-label="Toggle dark or light theme">
+                        <span id="theme-toggle-icon"><i class="fas fa-sun" aria-hidden="true"></i></span>
+                        <span id="theme-toggle-text">Toggle Theme</span>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Sticky Section Navigation -->
+        <nav class="doc-nav" aria-label="Component sections">
+            <div class="doc-nav-links">
+                <a href="#colors">Colors & Tokens</a>
+                <a href="#typography">Typography</a>
+                <a href="#buttons">Buttons & Pills</a>
+                <a href="#kpi-cards">KPI Metrics</a>
+                <a href="#event-cards">Event Cards</a>
+                <a href="#forms">Forms & Validation</a>
+                <a href="#feedback">Toasts & Shimmers</a>
+            </div>
+            <span style="font-size: 0.8rem; color: var(--ink-500); font-weight: 600;">v8.0 Live Preview</span>
+        </nav>
+
+        <main id="main-content">
+            <!-- 1. COLOR TOKENS -->
+            <section id="colors" class="doc-section">
+                <div class="doc-section-header">
+                    <h2 class="doc-section-title"><i class="fas fa-palette" style="color: var(--snpsu-gold);" aria-hidden="true"></i> Color Tokens & Contrast</h2>
+                    <span class="doc-section-badge">Brand & Surface</span>
+                </div>
+                <div class="swatch-grid">
+                    <div class="swatch-card" data-h-click="components_reference:2">
+                        <div class="swatch-color" style="background: #00185e;"></div>
+                        <div class="swatch-info">
+                            <div class="swatch-name">SNPSU Blue</div>
+                            <div class="swatch-hex">--snpsu-blue (#00185e)</div>
+                        </div>
+                    </div>
+                    <div class="swatch-card" data-h-click="components_reference:3">
+                        <div class="swatch-color" style="background: #c69d67;"></div>
+                        <div class="swatch-info">
+                            <div class="swatch-name">SNPSU Gold</div>
+                            <div class="swatch-hex">--snpsu-gold (#c69d67)</div>
+                        </div>
+                    </div>
+                    <div class="swatch-card" data-h-click="components_reference:4">
+                        <div class="swatch-color" style="background: #6366f1;"></div>
+                        <div class="swatch-info">
+                            <div class="swatch-name">Technical Indigo</div>
+                            <div class="swatch-hex">--cat-technical (#6366f1)</div>
+                        </div>
+                    </div>
+                    <div class="swatch-card" data-h-click="components_reference:5">
+                        <div class="swatch-color" style="background: #10b981;"></div>
+                        <div class="swatch-info">
+                            <div class="swatch-name">Success Green</div>
+                            <div class="swatch-hex">--success (#10b981)</div>
+                        </div>
+                    </div>
+                    <div class="swatch-card" data-h-click="components_reference:6">
+                        <div class="swatch-color" style="background: #ef4444;"></div>
+                        <div class="swatch-info">
+                            <div class="swatch-name">Danger / Live Red</div>
+                            <div class="swatch-hex">--danger (#ef4444)</div>
+                        </div>
+                    </div>
+                    <div class="swatch-card" data-h-click="components_reference:7">
+                        <div class="swatch-color" style="background: #f59e0b;"></div>
+                        <div class="swatch-info">
+                            <div class="swatch-name">Amber Warning</div>
+                            <div class="swatch-hex">--warning (#f59e0b)</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 2. BUTTONS & BADGES -->
+            <section id="buttons" class="doc-section">
+                <div class="doc-section-header">
+                    <h2 class="doc-section-title"><i class="fas fa-square-check" style="color: var(--cat-technical);" aria-hidden="true"></i> Buttons, Badges & Pills</h2>
+                    <span class="doc-section-badge">Interactive States</span>
+                </div>
+                <div class="glass-card-v8" style="padding: 1.75rem; margin-bottom: 1.5rem;">
+                    <h3 style="font-size: 1.1rem; margin-bottom: 1rem;">Primary Action Buttons</h3>
+                    <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
+                        <button class="btn-v8-primary" type="button"><i class="fas fa-plus" aria-hidden="true"></i> Create New Event</button>
+                        <button class="btn-v8-gold" type="button"><i class="fas fa-bolt" aria-hidden="true"></i> Quick Register</button>
+                        <button class="btn-v8-glass" type="button"><i class="fas fa-filter" aria-hidden="true"></i> Filter Results</button>
+                        <button class="btn-v8-primary" disabled style="opacity: 0.55; cursor: not-allowed;"><i class="fas fa-lock" aria-hidden="true"></i> Disabled Action</button>
+                    </div>
+                </div>
+
+                <div class="glass-card-v8" style="padding: 1.75rem;">
+                    <h3 style="font-size: 1.1rem; margin-bottom: 1rem;">Category Badges & Status Pills</h3>
+                    <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center;">
+                        <span class="pill-badge-v8 pill-technical"><i class="fas fa-code" aria-hidden="true"></i> Technical</span>
+                        <span class="pill-badge-v8 pill-cultural"><i class="fas fa-music" aria-hidden="true"></i> Cultural</span>
+                        <span class="pill-badge-v8 pill-sports"><i class="fas fa-trophy" aria-hidden="true"></i> Sports</span>
+                        <span class="pill-badge-v8 pill-live"><i class="fas fa-circle" aria-hidden="true"></i> Live Now</span>
+                        <span class="badge bg-success rounded-pill px-3 py-2">Approved</span>
+                        <span class="badge bg-warning text-dark rounded-pill px-3 py-2">Pending Review</span>
+                        <span class="badge bg-danger rounded-pill px-3 py-2">Registration Closed</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 3. KPI METRIC WIDGETS -->
+            <section id="kpi-cards" class="doc-section">
+                <div class="doc-section-header">
+                    <h2 class="doc-section-title"><i class="fas fa-chart-line" style="color: var(--success);" aria-hidden="true"></i> KPI & Metric Widgets</h2>
+                    <span class="doc-section-badge">Tabular Figures</span>
+                </div>
+                <div class="demo-grid-4">
+                    <div class="kpi-card-v8 card-interactive-glow">
+                        <div class="kpi-header">
+                            <span class="kpi-title">Total Registrations</span>
+                            <div class="kpi-icon-glow kpi-icon-blue"><i class="fas fa-users" aria-hidden="true"></i></div>
+                        </div>
+                        <div class="kpi-value">2,840</div>
+                        <div class="kpi-trend-pill kpi-trend-up"><i class="fas fa-arrow-up" aria-hidden="true"></i> +18.4% this week</div>
+                    </div>
+
+                    <div class="kpi-card-v8 card-interactive-glow">
+                        <div class="kpi-header">
+                            <span class="kpi-title">Active Events</span>
+                            <div class="kpi-icon-glow kpi-icon-gold"><i class="fas fa-calendar-check" aria-hidden="true"></i></div>
+                        </div>
+                        <div class="kpi-value">42</div>
+                        <div class="kpi-trend-pill kpi-trend-up"><i class="fas fa-arrow-up" aria-hidden="true"></i> +5 new today</div>
+                    </div>
+
+                    <div class="kpi-card-v8 card-interactive-glow">
+                        <div class="kpi-header">
+                            <span class="kpi-title">Revenue Collected</span>
+                            <div class="kpi-icon-glow kpi-icon-green"><i class="fas fa-indian-rupee-sign" aria-hidden="true"></i></div>
+                        </div>
+                        <div class="kpi-value">₹1,84,500</div>
+                        <div class="kpi-trend-pill kpi-trend-up"><i class="fas fa-arrow-up" aria-hidden="true"></i> 94% of target</div>
+                    </div>
+
+                    <div class="kpi-card-v8 card-interactive-glow">
+                        <div class="kpi-header">
+                            <span class="kpi-title">Check-in Rate</span>
+                            <div class="kpi-icon-glow kpi-icon-indigo"><i class="fas fa-qrcode" aria-hidden="true"></i></div>
+                        </div>
+                        <div class="kpi-value">88.6%</div>
+                        <div class="kpi-trend-pill kpi-trend-down"><i class="fas fa-arrow-down" aria-hidden="true"></i> -1.2% vs last sem</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 4. EVENT CARDS -->
+            <section id="event-cards" class="doc-section">
+                <div class="doc-section-header">
+                    <h2 class="doc-section-title"><i class="fas fa-ticket" style="color: var(--snpsu-gold);" aria-hidden="true"></i> Modern Event Cards</h2>
+                    <span class="doc-section-badge">Glass Surfaces</span>
+                </div>
+                <div class="demo-grid-3">
+                    <div class="event-card-v8 card-interactive-glow">
+                        <div class="event-media-wrap">
+                            <img loading="lazy" src="/static/campus.jpg" alt="SapthaTech Hackathon" class="event-media-img">
+                            <span class="event-category-badge" style="background: rgba(99, 102, 241, 0.85);">Technical</span>
+                            <span class="event-date-chip"><i class="fas fa-clock" aria-hidden="true"></i> Tomorrow, 9:00 AM</span>
+                        </div>
+                        <div class="event-body-v8">
+                            <div>
+                                <h3 style="font-size: 1.15rem; margin-bottom: 6px;">SapthaTech 36H Hackathon</h3>
+                                <p style="font-size: 0.875rem; color: var(--ink-600); margin-bottom: 1rem;">Annual flagship national AI & Web3 hackathon with ₹1,00,000 prize pool.</p>
+                            </div>
+                            <div style="display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--glass-border); padding-top: 10px;">
+                                <span style="font-weight: 700; color: var(--snpsu-gold);">Free Entry</span>
+                                <button class="btn-v8-primary" style="padding: 6px 14px; font-size: 0.85rem;" type="button">Register Now</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="event-card-v8 card-interactive-glow">
+                        <div class="event-media-wrap">
+                            <img loading="lazy" src="/static/campus.jpg" alt="Sapthagiri Fest" class="event-media-img">
+                            <span class="event-category-badge" style="background: rgba(198,157,103, 0.9);">Cultural</span>
+                            <span class="event-date-chip"><i class="fas fa-calendar" aria-hidden="true"></i> Sep 15, 2026</span>
+                        </div>
+                        <div class="event-body-v8">
+                            <div>
+                                <h3 style="font-size: 1.15rem; margin-bottom: 6px;">Nritya Ranga — Dance Fest</h3>
+                                <p style="font-size: 0.875rem; color: var(--ink-600); margin-bottom: 1rem;">Inter-college solo & group classical & contemporary dance contest.</p>
+                            </div>
+                            <div style="display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--glass-border); padding-top: 10px;">
+                                <span style="font-weight: 700; color: var(--ink-900);">₹250 / Team</span>
+                                <button class="btn-v8-gold" style="padding: 6px 14px; font-size: 0.85rem;" type="button">Register Team</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="event-card-v8 card-interactive-glow">
+                        <div class="event-media-wrap">
+                            <img loading="lazy" src="/static/campus.jpg" alt="Badminton Championship" class="event-media-img">
+                            <span class="event-category-badge" style="background: rgba(16, 185, 129, 0.9);">Sports</span>
+                            <span class="event-date-chip"><i class="fas fa-circle" style="color: #ef4444;" aria-hidden="true"></i> Live Right Now</span>
+                        </div>
+                        <div class="event-body-v8">
+                            <div>
+                                <h3 style="font-size: 1.15rem; margin-bottom: 6px;">Inter-University Badminton Cup</h3>
+                                <p style="font-size: 0.875rem; color: var(--ink-600); margin-bottom: 1rem;">Quarter finals and semi-finals underway at SNPSU Sports Complex.</p>
+                            </div>
+                            <div style="display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--glass-border); padding-top: 10px;">
+                                <span style="font-weight: 700; color: var(--success);">Live Stream</span>
+                                <button class="btn-v8-glass" style="padding: 6px 14px; font-size: 0.85rem;" type="button"><i class="fas fa-play" aria-hidden="true"></i> Watch Live</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 5. FORMS & VALIDATION -->
+            <section id="forms" class="doc-section">
+                <div class="doc-section-header">
+                    <h2 class="doc-section-title"><i class="fas fa-keyboard" style="color: var(--snpsu-indigo);" aria-hidden="true"></i> Accessible Form Controls & Validation</h2>
+                    <span class="doc-section-badge">ARIA Supported</span>
+                </div>
+                <div class="glass-card-v8" style="padding: 2rem;">
+                    <form data-h-submit="components_reference:8">
+                        <div class="demo-grid-2">
+                            <div class="form-group-v8">
+                                <label for="demo-name" class="form-label-v8">Full Name <span style="color: var(--danger);" aria-hidden="true">*</span></label>
+                                <input id="demo-name" type="text" class="form-input-v8" placeholder="e.g. Kiran Biradar" required aria-describedby="demo-name-help">
+                                <div id="demo-name-help" class="input-feedback-msg is-valid"><i class="fas fa-circle-check" aria-hidden="true"></i> Matches university student registry</div>
+                            </div>
+
+                            <div class="form-group-v8">
+                                <label for="demo-email" class="form-label-v8">University Email <span style="color: var(--danger);" aria-hidden="true">*</span></label>
+                                <input id="demo-email" type="email" class="form-input-v8" placeholder="student@snpsu.edu.in" required aria-describedby="demo-email-help">
+                                <div id="demo-email-help" class="input-feedback-msg is-valid"><i class="fas fa-shield-halved" aria-hidden="true"></i> Verified @snpsu.edu.in domain</div>
+                            </div>
+                        </div>
+
+                        <div class="demo-grid-2" style="margin-top: 0.5rem;">
+                            <div class="form-group-v8">
+                                <label for="demo-category" class="form-label-v8">Event Category <span style="color: var(--danger);" aria-hidden="true">*</span></label>
+                                <select id="demo-category" class="form-input-v8" required>
+                                    <option value="technical">Technical & Coding</option>
+                                    <option value="cultural">Cultural & Arts</option>
+                                    <option value="sports">Sports & Athletics</option>
+                                    <option value="management">Management & Business</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group-v8">
+                                <label for="demo-phone" class="form-label-v8">WhatsApp / Mobile Number</label>
+                                <input id="demo-phone" type="tel" class="form-input-v8" placeholder="+91 98765 43210">
+                            </div>
+                        </div>
+
+                        <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 1.5rem;">
+                            <button type="reset" class="btn-v8-glass">Reset</button>
+                            <button type="submit" class="btn-v8-primary"><i class="fas fa-paper-plane" aria-hidden="true"></i> Submit Demonstration</button>
+                        </div>
+                    </form>
+                </div>
+            </section>
+
+            <!-- 6. FEEDBACK, TOASTS & SHIMMERS -->
+            <section id="feedback" class="doc-section">
+                <div class="doc-section-header">
+                    <h2 class="doc-section-title"><i class="fas fa-bell" style="color: var(--snpsu-gold);" aria-hidden="true"></i> Feedback, Toasts & Skeleton Shimmers</h2>
+                    <span class="doc-section-badge">Async Loading</span>
+                </div>
+                <div class="demo-grid-2">
+                    <!-- Shimmer Loading Demo -->
+                    <div class="glass-card-v8" style="padding: 1.75rem;">
+                        <h3 style="font-size: 1.1rem; margin-bottom: 1.25rem;">Skeleton Loading Shimmer</h3>
+                        <div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 1rem;">
+                            <div class="skeleton-v8 skeleton-avatar"></div>
+                            <div style="flex-grow: 1;">
+                                <div class="skeleton-v8 skeleton-title"></div>
+                                <div class="skeleton-v8 skeleton-text"></div>
+                            </div>
+                        </div>
+                        <div class="skeleton-v8" style="height: 100px; width: 100%; border-radius: var(--radius-sm);"></div>
+                    </div>
+
+                    <!-- Toast Triggers -->
+                    <div class="glass-card-v8" style="padding: 1.75rem;">
+                        <h3 style="font-size: 1.1rem; margin-bottom: 1.25rem;">Interactive Toast Notifications</h3>
+                        <p style="font-size: 0.9rem; color: var(--ink-600); margin-bottom: 1.25rem;">Trigger glassmorphic feedback banners with dynamic screen reader support.</p>
+                        <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                            <button class="btn-v8-glass" style="justify-content: space-between;" data-h-click="components_reference:9" type="button">
+                                <span><i class="fas fa-circle-check" style="color: var(--success); margin-right: 6px;" aria-hidden="true"></i> Trigger Success Toast</span>
+                                <i class="fas fa-chevron-right" aria-hidden="true"></i>
+                            </button>
+                            <button class="btn-v8-glass" style="justify-content: space-between;" data-h-click="components_reference:10" type="button">
+                                <span><i class="fas fa-triangle-exclamation" style="color: var(--warning); margin-right: 6px;" aria-hidden="true"></i> Trigger Warning Toast</span>
+                                <i class="fas fa-chevron-right" aria-hidden="true"></i>
+                            </button>
+                            <button class="btn-v8-glass" style="justify-content: space-between;" data-h-click="components_reference:11" type="button">
+                                <span><i class="fas fa-circle-xmark" style="color: var(--danger); margin-right: 6px;" aria-hidden="true"></i> Trigger Error Toast</span>
+                                <i class="fas fa-chevron-right" aria-hidden="true"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container" style="position: fixed; bottom: 24px; right: 24px; z-index: 99999; display: flex; flex-direction: column; gap: 10px;"></div>
+
+    <script src="/static/js/global.js"></script>
+    <script src="/static/js/pages/components_reference.js"></script>
+{% endblock %}
+{% block handler_scripts %}{{ super() }}<script src="/static/js/handlers/components_reference.js"></script>{% endblock %}

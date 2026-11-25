@@ -1,0 +1,11 @@
+{% extends "layouts/status.html" %}
+{% set status_tone = 'warning' %}
+{% set status_icon = 'fa-wifi' %}
+{% block title %}You're offline{% endblock %}
+{% block status %}
+  <h1>You're offline</h1>
+  <p>We couldn't reach the network. Tickets and pages you've already opened still work.</p>
+  <div class="status-actions"><a href="/" class="btn btn-primary" data-h-click="offline:1"><i class="fas fa-rotate-right" aria-hidden="true"></i> Retry</a></div>
+  <p class="small text-subtle mt-3 mb-0">Tip: open your ticket once while online and it will be available offline at the event gate.</p>
+{% endblock %}
+{% block handler_scripts %}{{ super() }}<script src="/static/js/handlers/offline.js"></script>{% endblock %}

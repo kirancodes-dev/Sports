@@ -1,0 +1,25 @@
+{% extends "layouts/status.html" %}
+{#- Payment failed (UPG-63): the shared status card. -#}
+{% set status_tone = 'danger' %}
+{% set status_icon = 'fa-circle-xmark' %}
+{% block title %}Payment failed{% endblock %}
+{% block status %}
+  <h1>Payment failed</h1>
+  <p>{{ reason }}</p>
+  <div class="callout callout--warning text-start mb-0">
+    <strong>What to do next</strong>
+    <ul class="small mb-0 mt-2 ps-3">
+      <li>Check that your card details are correct and try again</li>
+      <li>Make sure your bank hasn't blocked the transaction</li>
+      <li>Try a different payment method (UPI, net banking)</li>
+      <li>Your money has <strong>not</strong> been deducted</li>
+    </ul>
+  </div>
+  <div class="status-actions">
+    <a href="/" data-h-click="se:back" class="btn btn-primary"><i class="fas fa-arrow-left" aria-hidden="true"></i> Try again</a>
+    <a href="/" class="btn btn-secondary">Back to home</a>
+  </div>
+  {% if support_email %}
+  <p class="small text-subtle mt-3 mb-0">Need help? Email <a href="mailto:{{ support_email }}">{{ support_email }}</a></p>
+  {% endif %}
+{% endblock %}

@@ -1,0 +1,154 @@
+"""
+utils_links.py — the address that links in emails, QR codes and messages
+point to (UPG-91).
+
+BASE_URL by default (BLK-16). When a request arrives on an address that is
+trusted, links point there instead, so a link sent while the portal is used on
+this machine, through an ngrok tunnel or in the cloud opens that same place.
+
+Trusted addresses:
+  * the host of BASE_URL;
+  * every host in TRUSTED_HOSTS (comma-separated; "*.example.com" for subdomains);
+  * outside production only: this machine (localhost, 127.0.0.1, ::1), the
+    local network (private IP addresses) and ngrok tunnels.
+
+Any other Host header, forged or not, gets BASE_URL: a request can't make the
+portal email a link to someone else's site. Only the Host header is read;
+X-Forwarded-Host is never trusted (ProxyFix x_host=0, app.py), while the one
+proxy hop's X-Forwarded-Proto gives the scheme (ngrok and Cloud Run send https).
+"""
+import ipaddress
+import os
+from typing import Optional
+from urllib.parse import urlparse
+
+DEV_TUNNEL_SUFFIXES = ('.ngrok-free.app', '.ngrok-free.dev', '.ngrok.app', '.ngrok.io')
+
+
+def _hostname(host: str) -> str:
+    """'Example.com:5001' -> 'example.com'; '[::1]:5001' -> '::1'."""
+    host = (host or '').strip().lower()
+    if host.startswith('['):
+        return host[1:host.find(']')] if ']' in host else ''
+    return host.rsplit(':', 1)[0] if host.count(':') == 1 else host
+
+
+def _listed(name: str, patterns) -> bool:
+    for pattern in patterns:
+        if pattern.startswith('*.') and (name.endswith(pattern[1:]) or name == pattern[2:]):
+            return True
+        if name == pattern:
+            return True
+    return False
+
+
+def is_trusted_host(host: str, base_url: str, production: bool) -> bool:
+    name = _hostname(host)
+    if not name or any(c in name for c in '/\\@ '):
+        return False
+    if name == (urlparse(base_url).hostname or '').lower():
+        return True
+    listed = [p.strip().lower() for p in os.environ.get('TRUSTED_HOSTS', '').split(',') if p.strip()]
+    if _listed(name, listed):
+        return True
+    if production:
+        return False
+    if name == 'localhost' or name.endswith(DEV_TUNNEL_SUFFIXES):
+        return True
+    try:
+        ip = ipaddress.ip_address(name)
+    except ValueError:
+        return False
+    return ip.is_loopback or ip.is_private
+
+
+def request_origin(base_url: str) -> Optional[str]:
+    """'scheme://host' of the current request when its host is trusted, else None
+    (also outside a request, e.g. in scheduled jobs)."""
+    try:
+        from flask import current_app, has_request_context, request
+    except ImportError:
+        return None
+    if not has_request_context():
+        return None
+    production = str(current_app.config.get('FLASK_ENV') or os.environ.get('FLASK_ENV', '')).lower() == 'production'
+    host = request.host
+    if not is_trusted_host(host, base_url, production):
+        return None
+    return f"{request.scheme}://{host}"
+
+
+def request_address() -> str:
+    """'scheme://host' the current request came in on, trusted or not. Only for
+    showing or comparing (the institution page says when it was opened at an
+    address other than the saved one); never for building a link."""
+    try:
+        from flask import has_request_context, request
+    except ImportError:
+        return ''
+    if not has_request_context():
+        return ''
+    return f"{request.scheme}://{request.host}"
+
+
+def back_path(default: str, skip_prefix: str = '') -> str:
+    """Where a "Back" link should go: the page on this site the visitor came
+    from (?next=, else the referrer), as a path, never another site; else
+    `default` (UPG-92). Pages under `skip_prefix` (the page itself) don't count."""
+    try:
+        from flask import current_app, has_request_context, request
+    except ImportError:
+        return default
+    if not has_request_context():
+        return default
+    from utils_email import _configured_base_url
+    production = str(current_app.config.get('FLASK_ENV') or '').lower() == 'production'
+    for candidate in (request.args.get('next'), request.referrer):
+        if not candidate or '\\' in candidate:
+            continue
+        url = urlparse(candidate)
+        if url.scheme and url.scheme not in ('http', 'https'):
+            continue
+        if url.netloc and not is_trusted_host(url.netloc, _configured_base_url(), production):
+            continue
+        path = url.path or '/'
+        if not path.startswith('/') or path.startswith('//') or (skip_prefix and path.startswith(skip_prefix)):
+            continue
+        return path + (f'?{url.query}' if url.query else '')
+    return default
+
+
+ROLE_HOMES = {
+    'Student': '/participant/dashboard', 'Participant': '/participant/dashboard',
+    'ClubSPOC': '/spoc/dashboard', 'SPOC': '/spoc/dashboard', 'UnitAdmin': '/spoc/dashboard',
+    'EventOrganizer': '/spoc/dashboard',
+    'EventCoordinator': '/coordinator/dashboard', 'Coordinator': '/coordinator/dashboard',
+    'Volunteer': '/coordinator/scanner', 'Judge': '/judge/dashboard',
+    'SuperAdmin': '/admin/dashboard', 'Super Admin': '/admin/dashboard', 'Admin': '/admin/dashboard',
+    'UniversityAdmin': '/admin/dashboard',
+}
+
+
+def role_home() -> str:
+    """The signed-in user's home page, or '/' for a visitor (UPG-103)."""
+    try:
+        from flask import has_request_context, session
+    except ImportError:
+        return '/'
+    if not has_request_context() or not session.get('user_id'):
+        return '/'
+    return ROLE_HOMES.get(session.get('role', ''), '/dashboard')
+
+
+def page_back() -> tuple:
+    """(show, href) for the app's Back link on this page: hidden on the role's
+    home and on '/', else the page this visitor came from on this site, or
+    the role's home (UPG-103)."""
+    try:
+        from flask import has_request_context, request
+    except ImportError:
+        return False, '/'
+    home = role_home()
+    if not has_request_context() or request.path in (home, '/'):
+        return False, home
+    return True, back_path(home, skip_prefix=request.path)

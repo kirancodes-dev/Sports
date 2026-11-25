@@ -1,0 +1,11 @@
+{
+  "appId": "com.sapthaevent.app",
+  "appName": "SapthaEvent",
+  "webDir": "static",
+  "server": {
+    "url": "https://events.example.edu",
+    "allowNavigation": [
+      "events.example.edu"
+    ]
+  }
+}

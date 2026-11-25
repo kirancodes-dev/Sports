@@ -1,0 +1,183 @@
+{% extends "base_classic.html" %}
+{#- On the app layout and portal design system (UPG-63). -#}
+{% block title %}AI event report — {{ event.title }}{% endblock %}
+{% set hide_page_head = true %}
+{% block extra_css %}
+<style>
+/* AI event report (UPG-63) */
+.rep-header { background: var(--brand-navy); border-bottom: 3px solid var(--brand-gold); border-radius: var(--radius-lg); padding: 26px 28px; color: #fff; margin-bottom: var(--grid-gap); }
+.rep-header .eyebrow { color: var(--brand-gold-300); }
+.rep-header h1 { color: #fff; font-size: 1.6rem; margin: 0 0 6px; }
+.rep-header .meta { font-size: var(--fs-sm); color: rgba(255,255,255,.8); display: flex; gap: 8px 20px; flex-wrap: wrap; margin-top: 10px; }
+.rep-header .meta span { display: flex; align-items: center; gap: 6px; }
+.rep-header .meta i { color: var(--brand-gold-300); }
+.ai-badge { display: inline-flex; align-items: center; gap: 6px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.22); border-radius: var(--radius-pill); padding: 3px 12px; font-size: var(--fs-xs); font-weight: 700; margin-top: 12px; }
+.report-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr)); gap: 14px; margin-bottom: var(--grid-gap); }
+.report-stats .stat-card { text-align: center; }
+.report-stats .stat-icon { margin: 0 auto 10px; }
+.stat-val { font-family: var(--font-heading); font-size: 1.6rem; font-weight: 800; color: var(--text-strong); line-height: 1; font-variant-numeric: tabular-nums; }
+.sec { margin-bottom: var(--grid-gap); }
+.sec-title { font-family: var(--font-heading); font-size: var(--fs-md); font-weight: 700; color: var(--text-strong); display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.sec-title i { color: var(--brand-gold-600); }
+.podium-row { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+.podium-item { background: var(--surface-sunken); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; text-align: center; flex: 1; min-width: 160px; max-width: 220px; }
+.podium-item.p1 { background: var(--brand-gold-100); border-color: rgba(198,157,103,.5); }
+.pm-medal { font-size: 1.6rem; color: var(--brand-gold-600); }
+.p2 .pm-medal { color: #94a3b8; } .p3 .pm-medal { color: #b0703a; }
+.pm-team { font-family: var(--font-heading); font-size: var(--fs-base); font-weight: 800; color: var(--text-strong); margin: 6px 0 2px; }
+.pm-lead { font-size: var(--fs-sm); color: var(--text-subtle); }
+.pm-score { font-family: var(--font-heading); font-size: 1.35rem; font-weight: 800; color: var(--brand-ink); margin-top: 8px; }
+.rank-badge { background: var(--brand-navy); color: #fff; border-radius: var(--radius-xs); padding: 2px 8px; font-size: var(--fs-xs); font-weight: 700; }
+.narrative { background: var(--surface-sunken); border-left: 4px solid var(--brand-gold); border-radius: 0 var(--radius) var(--radius) 0; padding: 18px 22px; line-height: 1.75; color: var(--text); }
+.narrative p:last-child { margin-bottom: 0; }
+.narrative strong { color: var(--text-strong); }
+.sbar { height: 6px; background: var(--surface-muted); border-radius: var(--radius-pill); overflow: hidden; margin-top: 4px; }
+.sbar-fill { height: 100%; border-radius: var(--radius-pill); background: var(--brand-navy); }
+@media print { .no-print { display: none !important; } .rep-header { border-radius: 0; } }
+</style>
+{% endblock %}
+{% block content %}
+<div style="max-width:980px;margin:0 auto;">
+  <div class="d-flex justify-content-end gap-2 mb-3 no-print">
+    <a href="/spoc/dashboard" class="btn btn-secondary"><i class="fas fa-arrow-left" aria-hidden="true"></i> Console</a>
+    <button type="button" data-h-click="spoc/ai_report:2" class="btn btn-primary"><i class="fas fa-print" aria-hidden="true"></i> Print / PDF</button>
+  </div>
+
+  <!-- REPORT HEADER -->
+  <div class="rep-header">
+    <div class="eyebrow">AI event report</div>
+    <h1 id="page-title">{{ event.title }}</h1>
+    <div class="meta">
+      <span><i class="fas fa-calendar-alt"></i> {{ event.date or 'TBD' }}</span>
+      <span><i class="fas fa-map-marker-alt"></i> {{ venue_label(event) }}</span>
+      <span><i class="fas fa-tag"></i> {{ event.category or 'General' }}</span>
+      <span><i class="fas fa-clock"></i> Generated {{ generated_at }}</span>
+    </div>
+    <div class="ai-badge"><i class="fas fa-robot" aria-hidden="true"></i> Written with Gemini AI</div>
+  </div>
+
+  <!-- KEY STATS -->
+  <div class="report-stats">
+    <div class="stat-card">
+      <div class="stat-icon" aria-hidden="true"><i class="fas fa-users"></i>
+      </div>
+      <div class="stat-val">{{ stats.registered }}</div>
+      <div class="stat-label">Registered</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" aria-hidden="true"><i class="fas fa-check-circle"></i>
+      </div>
+      <div class="stat-val">{{ stats.attended }}</div>
+      <div class="stat-label">Attended</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" aria-hidden="true"><i class="fas fa-percentage"></i>
+      </div>
+      <div class="stat-val">{{ stats.attendance_pct }}%</div>
+      <div class="stat-label">Attendance Rate</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" aria-hidden="true"><i class="fas fa-gavel"></i>
+      </div>
+      <div class="stat-val">{{ stats.judges_count }}</div>
+      <div class="stat-label">Judges</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" aria-hidden="true"><i class="fas fa-star"></i>
+      </div>
+      <div class="stat-val">{{ stats.avg_score }}</div>
+      <div class="stat-label">Avg Score</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" aria-hidden="true"><i class="fas fa-trophy"></i>
+      </div>
+      <div class="stat-val">{{ stats.top_score }}</div>
+      <div class="stat-label">Top Score</div>
+    </div>
+  </div>
+
+  <!-- PODIUM -->
+  {% if top3 %}
+  <section class="panel sec">
+    <div class="sec-title">
+      <i class="fas fa-trophy"></i> Top Performers
+    </div>
+    <div class="podium-row">
+      {% for p in top3 %}
+      <div class="podium-item {{ 'p1' if loop.index==1 else 'p2' if loop.index==2 else 'p3' }}">
+        <div class="pm-medal"><i class="fas {{ 'fa-trophy' if loop.index==1 else 'fa-medal' }}" aria-hidden="true"></i><span class="visually-hidden">Place {{ loop.index }}</span></div>
+        <div class="pm-team">{{ p.team }}</div>
+        <div class="pm-lead">{{ p.lead }}</div>
+        <div class="pm-score">{{ p.score }}</div>
+        <div class="small text-subtle mt-1">
+          {{ p.judges }} judge{{ 's' if p.judges != 1 }}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  <!-- FULL SCORE TABLE -->
+  {% if leaderboard %}
+  <section class="panel sec">
+    <div class="sec-title">
+      <i class="fas fa-list-ol"></i> Full Leaderboard
+    </div>
+    <div class="table-responsive"><table class="table align-middle mb-0">
+      <thead>
+        <tr>
+          <th style="width:52px;">Rank</th>
+          <th>Team / Participant</th>
+          <th style="width:120px;text-align:right;">Score</th>
+          <th style="width:80px;text-align:center;">Judges</th>
+          <th style="width:90px;text-align:center;">Attendance</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in leaderboard %}
+        <tr>
+          <td><span class="rank-badge">{{ loop.index }}</span></td>
+          <td>
+            <div class="fw-bold text-strong">{{ row.team }}</div>
+            <div class="small text-subtle">{{ row.lead }}</div>
+          </td>
+          <td style="text-align:right;">
+            <span class="fw-bold text-strong tabular">{{ row.score }}</span>
+            <div class="sbar">
+              <div class="sbar-fill" style="width:{{ row.score_pct }}%;"></div>
+            </div>
+          </td>
+          <td class="text-center text-subtle">{{ row.judges }}</td>
+          <td style="text-align:center;">
+            {% if row.attended %}
+              <span class="se-badge se-badge--success">Present</span>
+            {% else %}
+              <span class="se-badge se-badge--neutral">Absent</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table></div>
+  </section>
+  {% endif %}
+
+  <!-- AI NARRATIVE -->
+  <section class="panel sec">
+    <div class="sec-title">
+      <i class="fas fa-robot"></i> AI Event Analysis
+      <span class="small fw-normal text-subtle">(Gemini 2.5 Flash)</span>
+    </div>
+    <div class="narrative">
+      {{ narrative | safe }}
+    </div>
+  </section>
+
+</div>
+
+{% include "layouts/_bootstrap_js.html" %}
+
+{% endblock %}
+{% block handler_scripts %}{{ super() }}<script src="/static/js/handlers/spoc__ai_report.js"></script>
+{% endblock %}

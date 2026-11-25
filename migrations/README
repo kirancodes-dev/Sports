@@ -1,0 +1,3 @@
+Alembic migrations for SapthaEvent. The schema is built only by these
+(0001_baseline holds every table in models_pg.py). See docs/DEPLOY.md,
+"Database migrations".

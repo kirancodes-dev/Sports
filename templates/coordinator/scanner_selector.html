@@ -1,0 +1,98 @@
+{% extends "base_classic.html" %}
+{#- On the app layout and portal design system (UPG-63). -#}
+{% import 'includes/ui.html' as ui with context %}
+{% set app_active = 'scanner' %}
+{% block title %}Scanner | SapthaEvent{% endblock %}
+{% block page_title %}Entry scanner{% endblock %}
+{% block page_sub %}Hello, {{ user_name }}. Pick an event to scan tickets, or open the walk-in helpdesk.{% endblock %}
+{% block page_actions %}<a href="/coordinator/on_spot" class="btn btn-gold"><i class="fas fa-cash-register" aria-hidden="true"></i> Walk-in helpdesk</a>{% endblock %}
+{% block extra_css %}
+<style>
+/* Coordinator scanner selector (UPG-63) */
+.sel-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.helpdesk-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; background: var(--brand-navy); color: #fff; border-radius: var(--radius-lg); border-bottom: 3px solid var(--brand-gold); padding: 18px 22px; margin-bottom: 28px; }
+.helpdesk-card h2 { font-size: 1rem; color: #fff; margin: 0 0 2px; }
+.helpdesk-card p { margin: 0; font-size: var(--fs-sm); color: rgba(255,255,255,.78); }
+.sel-section { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
+.sel-section h2 { font-size: 1rem; margin: 0; }
+.ev-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; margin-bottom: 28px; }
+.scan-card { background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow-sm); }
+.scan-card--today { border-left: 4px solid var(--danger); }
+.scan-card--tomorrow { border-left: 4px solid var(--warning); }
+.scan-card__when { font-size: var(--fs-xs); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+.scan-card__title { font-family: var(--font-heading); font-size: 1rem; font-weight: 700; color: var(--text-strong); margin: 0; }
+.scan-card__meta { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: var(--fs-sm); color: var(--text-muted); }
+.scan-card__meta span { display: inline-flex; align-items: center; gap: 6px; }
+.scan-card__meta i { color: var(--brand-gold-700); width: 1.1em; text-align: center; }
+.cap-label { display: flex; justify-content: space-between; font-size: var(--fs-xs); color: var(--text-muted); margin-bottom: 4px; }
+.cap-bar { height: 6px; background: var(--surface-sunken); border-radius: var(--radius-pill); overflow: hidden; }
+.cap-fill { height: 100%; background: var(--brand-navy); border-radius: var(--radius-pill); }
+.scan-card__actions { display: flex; gap: 8px; margin-top: auto; }
+.scan-card__actions .btn-primary { flex: 1; }
+</style>
+{% endblock %}
+
+{% macro scan_card(ev, tone, when, primary_label) -%}
+{% set fill = ((ev.reg_count / ev.max_cap * 100) | int) if ev.max_cap else 0 %}
+<article class="scan-card{% if tone %} scan-card--{{ tone }}{% endif %}">
+  <div class="scan-card__when">{{ when }}</div>
+  <h3 class="scan-card__title">{{ ev.title }}</h3>
+  <div class="scan-card__meta">
+    <span><i class="fas fa-clock" aria-hidden="true"></i>{{ ev.time or "Time to be announced" }}</span>
+    <span><i class="fas fa-map-marker-alt" aria-hidden="true"></i>{{ ev.venue }}</span>
+    <span><i class="fas fa-users" aria-hidden="true"></i>{{ ev.reg_count }} registered</span>
+  </div>
+  {% if ev.max_cap %}
+  <div>
+    <div class="cap-label"><span>Capacity</span><span>{{ ev.reg_count }} / {{ ev.max_cap }}</span></div>
+    <div class="cap-bar" role="progressbar" aria-label="Capacity used" aria-valuenow="{{ [fill, 100] | min }}" aria-valuemin="0" aria-valuemax="100"><div class="cap-fill" style="width:{{ [fill, 100] | min }}%;"></div></div>
+  </div>
+  {% endif %}
+  <div class="scan-card__actions">
+    <a href="/coordinator/scan/{{ ev.id }}" class="btn btn-primary"><i class="fas fa-qrcode" aria-hidden="true"></i> {{ primary_label }}</a>
+    {% if tone == 'today' %}<a href="/coordinator/on_spot" class="btn btn-secondary"><i class="fas fa-plus" aria-hidden="true"></i> Walk-in</a>{% endif %}
+    <a href="/coordinator/runsheet/{{ ev.id }}" class="btn btn-secondary" data-runsheet-link><i class="fas fa-clipboard-list" aria-hidden="true"></i> Run sheet</a>
+  </div>
+</article>
+{%- endmacro %}
+
+{% block content %}
+<div class="sel-stats">
+  {{ ui.stat_tile('fa-calendar-check', total_assigned, 'Assigned events') }}
+  {{ ui.stat_tile('fa-bolt', today_events | length, 'Today') }}
+  {{ ui.stat_tile('fa-arrow-right', tomorrow_events | length, 'Tomorrow') }}
+</div>
+
+<div class="helpdesk-card">
+  <div>
+    <h2><i class="fas fa-cash-register me-1 text-gold" aria-hidden="true"></i> Walk-in helpdesk</h2>
+    <p>Register walk-ins, collect payment and print instant tickets.</p>
+  </div>
+  <a href="/coordinator/on_spot" class="btn btn-gold">Open helpdesk <i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+</div>
+
+{% if today_events %}
+<div class="sel-section"><span class="se-badge se-badge--danger">Live today</span><h2>Today's events</h2></div>
+<div class="ev-grid">
+  {% for ev in today_events %}{{ scan_card(ev, 'today', 'Today', 'Scan tickets') }}{% endfor %}
+</div>
+{% endif %}
+
+{% if tomorrow_events %}
+<div class="sel-section"><span class="se-badge se-badge--warning">Tomorrow</span><h2>Tomorrow's events</h2></div>
+<div class="ev-grid">
+  {% for ev in tomorrow_events %}{{ scan_card(ev, 'tomorrow', 'Tomorrow · ' ~ ev.date|day, 'Open scanner') }}{% endfor %}
+</div>
+{% endif %}
+
+{% if upcoming_events %}
+<div class="sel-section"><span class="se-badge se-badge--info">Upcoming</span><h2>Upcoming events</h2></div>
+<div class="ev-grid">
+  {% for ev in upcoming_events %}{{ scan_card(ev, '', (ev.category ~ ' · ' ~ ev.date|day), 'Open scanner') }}{% endfor %}
+</div>
+{% endif %}
+
+{% if not today_events and not tomorrow_events and not upcoming_events %}
+{{ ui.empty_state('fa-calendar-xmark', 'No active events assigned', 'Ask your SPOC to assign you to an event.') }}
+{% endif %}
+{% endblock %}

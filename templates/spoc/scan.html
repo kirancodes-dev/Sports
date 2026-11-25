@@ -1,0 +1,662 @@
+{% extends "layouts/fullscreen.html" %}
+{#- On the shared document since UPG-23d (full-screen: no footer). -#}
+{% block csrf_meta %}<meta name="csrf-token" content="{{ csrf_token() }}">{% endblock %}
+{% block head %}
+<title>QR Scanner | {{ event.title }}</title>
+{% include "layouts/_bootstrap_css.html" %}
+{% include "layouts/_fontawesome.html" %}
+<link href="/static/css/global.css" rel="stylesheet">
+<style>
+/* SPOC scanner (UPG-63): a dark camera tool on the brand navy */
+:root{--blue:var(--brand-navy);--orange:var(--brand-gold);--scan-bg:#070f3a;--scan-card:#0f1d5c;--scan-hover:#172873;--scan-line:rgba(255,255,255,.1);--scan-muted:#b4bee0;--scan-subtle:#8f9bc4;}
+*{box-sizing:border-box;}
+body{font-family:var(--font-body);background:var(--scan-bg);min-height:100vh;color:#fff;}
+h1,h2,h3,h4,h5,h6{font-family: var(--font-heading);}
+
+.topbar{padding:10px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.topbar .brand-logo{height:30px;}
+@media (max-width:575.98px){.topbar{flex-wrap:wrap;}.topbar>.text-end{flex:1 1 100%;text-align:left!important;}}
+.topbar-title{font-family: var(--font-heading);font-weight:700;font-size:14px;color:#fff;}
+.topbar-sub{font-size:11px;color:var(--scan-muted);margin-top:1px;}
+.back-btn{color:var(--scan-muted);text-decoration:none;font-size:13px;display:flex;align-items:center;gap:6px;transition:.15s;}
+.back-btn:hover{color:#fff;}
+
+.counter-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:16px 20px 8px;}
+.counter-card{background:var(--scan-card);border-radius:12px;padding:14px 16px;text-align:center;border:1px solid rgba(255,255,255,.07);}
+.counter-val{font-family: var(--font-heading);font-size:28px;font-weight:800;line-height:1;}
+.counter-label{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--scan-subtle);margin-top:4px;}
+.cv-green{color:#22c55e;}
+.cv-blue{color:#c9d3ff;}
+
+/* Progress Bar */
+.progress-container{padding:0 20px 16px;}
+.progress-wrap{height:8px;background:var(--scan-card);border-radius:100px;overflow:hidden;border:1px solid rgba(255,255,255,0.05);margin-top:6px;}
+.progress-bar-custom{height:100%;background:linear-gradient(90deg, #10b981, #22c55e);border-radius:100px;width:0%;transition:width 0.4s cubic-bezier(0.4, 0, 0.2, 1);}
+
+/* Custom Tabs */
+.tabs-container{padding:0 20px 16px;}
+.nav-tabs-custom{display:flex;background:var(--scan-card);border-radius:12px;padding:4px;border:1px solid rgba(255,255,255,0.06);}
+.tab-btn{flex:1;padding:10px;border:none;border-radius:8px;background:transparent;color:var(--scan-muted);font-size:13px;font-weight:600;font-family: var(--font-heading);transition:0.15s;display:flex;align-items:center;justify-content:center;gap:6px;}
+.tab-btn.active{background:var(--brand-navy);color:#fff;box-shadow:inset 0 -2px 0 var(--brand-gold);box-shadow:0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);}
+
+.scanner-wrap{padding:0 20px;margin-bottom:16px;}
+#qr-reader{border-radius:16px;overflow:hidden;background:#000;width:100%;aspect-ratio:1/1;position:relative;}
+#qr-reader video{width:100%;height:100%;object-fit:cover;}
+#qr-reader canvas{display:none;}
+
+/* Override html5-qrcode default styles */
+#qr-reader__dashboard{display:none !important;}
+#qr-reader__header_message{display:none !important;}
+#qr-reader__status_span{display:none !important;}
+
+.scan-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;}
+.scan-frame{width:65%;height:65%;border:2px solid rgba(198,157,103,.8);border-radius:16px;box-shadow:0 0 0 9999px rgba(0,0,0,.45);}
+.scan-line{position:absolute;width:65%;height:2px;background:linear-gradient(90deg,transparent,var(--orange),transparent);border-radius:100px;animation:scanline 2s linear infinite;}
+@keyframes scanline{0%{top:17.5%}100%{top:82.5%}}
+
+.start-btn{display:block;width:100%;padding:14px;background:var(--orange);color:var(--brand-navy);font-family: var(--font-heading);font-weight:700;font-size:14px;border:none;border-radius:12px;cursor:pointer;transition:.15s;text-align:center;}
+.start-btn:hover{background:#b8894a;}
+.stop-btn{display:none;width:100%;padding:14px;background:var(--scan-card);color:var(--scan-muted);font-family: var(--font-heading);font-weight:700;font-size:14px;border:1px solid rgba(255,255,255,.1);border-radius:12px;cursor:pointer;transition:.15s;}
+.stop-btn:hover{background:var(--scan-hover);color:#fff;}
+
+/* Manual check-in section */
+.search-wrap{padding:0 20px 12px;}
+.search-box-custom{background:var(--scan-card);border-radius:12px;border:1px solid rgba(255,255,255,0.08);padding:2px 14px;display:flex;align-items:center;gap:10px;}
+.search-box-custom input{flex:1;background:transparent;border:none;color:#fff;padding:12px 0;font-size:13px;outline:none;}
+.search-box-custom i{color:var(--scan-subtle);font-size:14px;}
+
+.filter-pills-wrap{padding:0 20px 16px;display:flex;gap:8px;overflow-x:auto;}
+.filter-pill{background:var(--scan-card);border:1px solid rgba(255,255,255,0.06);border-radius:100px;padding:6px 14px;color:var(--scan-muted);font-size:12px;font-weight:500;cursor:pointer;transition:0.15s;}
+.filter-pill:hover{color:#fff;background:var(--scan-hover);}
+.filter-pill.active{background:var(--orange);color:var(--brand-navy);border-color:transparent;}
+
+.manual-list{padding:0 20px 20px;display:flex;flex-direction:column;gap:8px;max-height:400px;overflow-y:auto;}
+.manual-item{background:var(--scan-card);border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;transition:0.15s;}
+.manual-item:hover{border-color:rgba(255,255,255,0.12);background:var(--scan-hover);}
+.manual-name{font-weight:600;font-size:13.5px;color:#f8fafc;}
+.manual-sub{font-size:11.5px;color:var(--scan-subtle);margin-top:2px;}
+.manual-btn{background:#22c55e;color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;transition:0.12s;display:flex;align-items:center;gap:4px;}
+.manual-btn:hover{background:#16a34a;}
+.manual-status{font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px;}
+.status-present{color:#22c55e;}
+.status-absent{color:var(--scan-subtle);}
+
+.result-panel{margin:12px 20px;padding:16px 20px;border-radius:14px;display:none;animation:fadeIn .25s ease;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.rp-success{background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);}
+.rp-already{background:rgba(234,179,8,.1);border:1px solid rgba(234,179,8,.3);}
+.rp-invalid{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);}
+.rp-icon{font-size:28px;margin-bottom:8px;}
+.rp-success .rp-icon{color:#22c55e;}.rp-already .rp-icon{color:#eab308;}.rp-invalid .rp-icon{color:#ef4444;}
+.rp-status{font-family: var(--font-heading);font-weight:700;font-size:16px;}
+.rp-success .rp-status{color:#22c55e;}
+.rp-already .rp-status{color:#eab308;}
+.rp-invalid .rp-status{color:#ef4444;}
+.rp-detail{font-size:13px;color:var(--scan-muted);margin-top:4px;}
+.rp-name{font-size:14px;font-weight:600;color:#e2e8f0;margin-top:8px;}
+.rp-time{font-size:12px;color:var(--scan-subtle);margin-top:2px;}
+
+.log-section{padding:0 20px 80px;}
+.log-title{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--scan-subtle);margin-bottom:10px;font-weight:600;}
+.log-list{display:flex;flex-direction:column;gap:8px;max-height:260px;overflow-y:auto;}
+.log-item{background:var(--scan-card);border-radius:10px;padding:10px 14px;display:flex;align-items:center;gap:12px;font-size:13px;border:1px solid rgba(255,255,255,.06);}
+.log-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.ld-green{background:#22c55e;}
+.ld-yellow{background:#eab308;}
+.ld-red{background:#ef4444;}
+.log-name{font-weight:600;color:#e2e8f0;flex:1;}
+.log-time{font-size:11px;color:var(--scan-subtle);}
+.progress-head{font-size:11px;color:var(--scan-subtle);font-weight:600;text-transform:uppercase;letter-spacing:.5px;}
+.scan-locked{text-align:center;padding:40px 20px 20px;}
+.scan-locked__icon{width:72px;height:72px;margin:0 auto;border-radius:50%;background:var(--scan-card);border:1px solid var(--scan-line);display:flex;align-items:center;justify-content:center;font-size:28px;color:var(--brand-gold);}
+.scan-locked h2{font-weight:700;font-size:1.25rem;color:#fff;margin-top:14px;}
+.scan-locked p{color:var(--scan-muted);font-size:14px;margin-top:8px;}
+.scan-locked strong{color:#fff;}
+.scan-ghost-btn{display:inline-block;margin-top:20px;padding:10px 24px;background:var(--scan-card);color:var(--scan-muted);border-radius:10px;text-decoration:none;font-size:13px;border:1px solid var(--scan-line);}
+.scan-ghost-btn:hover{color:#fff;background:var(--scan-hover);}
+.cam-placeholder{aspect-ratio:1/1;background:var(--scan-card);border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;border:2px dashed var(--scan-line);}
+.cam-placeholder i{font-size:48px;color:var(--scan-subtle);}
+.cam-placeholder span{color:var(--scan-subtle);font-size:13px;}
+.list-empty{color:var(--scan-subtle);font-size:13px;text-align:center;padding:20px;}
+.team-name{color:var(--brand-gold);}
+.delivery-badge{font-size:10px;margin-left:6px;font-weight:500;padding:3px 6px;}
+.tab-btn:focus-visible,.filter-pill:focus-visible,.start-btn:focus-visible,.stop-btn:focus-visible,.manual-btn:focus-visible{outline:2px solid var(--brand-gold);outline-offset:2px;}
+</style>
+{% endblock %}
+{% block body %}
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <div class="d-flex align-items-center gap-3">
+    <img src="/static/img/snpsu-logo-reversed.png" alt="SNPSU" class="brand-logo">
+    <a href="/spoc/dashboard" class="back-btn"><i class="fas fa-arrow-left" aria-hidden="true"></i> Dashboard</a>
+  </div>
+  <div class="text-end">
+    <h1 class="topbar-title m-0">QR Scanner & Check-in</h1>
+    <div class="topbar-sub">{{ event.title }}</div>
+  </div>
+</div>
+
+<!-- COUNTERS -->
+<div class="counter-row">
+  <div class="counter-card">
+    <div class="counter-val cv-green" id="presentCount">{{ present_count }}</div>
+    <div class="counter-label">Checked in</div>
+  </div>
+  <div class="counter-card">
+    <div class="counter-val cv-blue">{{ total_count }}</div>
+    <div class="counter-label">Registered</div>
+  </div>
+</div>
+
+<!-- CHECK-IN PROGRESS BAR -->
+<div class="progress-container">
+  <div class="d-flex justify-content-between align-items-center progress-head">
+    <span>Check-in Progress</span>
+    <span id="progressText">0%</span>
+  </div>
+  <div class="progress-wrap">
+    <div class="progress-bar-custom" id="progressBar"></div>
+  </div>
+</div>
+
+<!-- TABS -->
+<div class="tabs-container">
+  <div class="nav-tabs-custom">
+    <button class="tab-btn active" id="btnTabScan" data-h-click="spoc/scan:1">
+      <i class="fas fa-qrcode"></i> QR Scan
+    </button>
+    <button class="tab-btn" id="btnTabManual" data-h-click="spoc/scan:2">
+      <i class="fas fa-list-ul"></i> Manual List
+    </button>
+  </div>
+</div>
+
+{% if sessions %}
+<!-- SESSION MODE (UPG-159): scan people into one agenda session -->
+<div class="tabs-container">
+  <label for="scanMode" class="topbar-sub d-block mb-1">Scanning for</label>
+  <select id="scanMode" class="form-select form-select-sm" data-scan-mode>
+    <option value="">Event entry</option>
+    {% for s in sessions %}
+    <option value="{{ s.id }}">Session: {{ s.time }} {{ s.title }}{% if s.room %} ({{ s.room }}){% endif %}{% if s.capacity %} · {{ s.capacity }} seats{% endif %}</option>
+    {% endfor %}
+  </select>
+</div>
+{% endif %}
+
+<!-- SCANNER TAB VIEW -->
+<div id="scanView">
+  {% if not scanning_open %}
+  <div class="scan-locked">
+    <div class="scan-locked__icon" aria-hidden="true"><i class="fas fa-lock"></i></div>
+    <h2>Scanner locked</h2>
+    {#- The event's days in India (UPG-378) -#}
+    {% if checkin.key == 'before' %}
+    <p>Check-in opens on <strong>{{ checkin.first }}</strong>. Come back on the event day.</p>
+    {% else %}
+    <p data-checkin-over>The event ended on <strong>{{ checkin.last }}</strong>. Someone who came but wasn't scanned:
+      open <strong>Manual List</strong> and choose <strong>Mark present</strong>.</p>
+    {% endif %}
+    <a href="/spoc/dashboard" class="scan-ghost-btn">
+      <i class="fas fa-arrow-left" aria-hidden="true"></i> Back to dashboard
+    </a>
+  </div>
+  {% else %}
+  <div class="scanner-wrap">
+    <div id="qr-reader" style="display:none;">
+      <div class="scan-overlay">
+        <div class="scan-frame"></div>
+        <div class="scan-line"></div>
+      </div>
+    </div>
+    <div id="placeholder" class="cam-placeholder">
+      <i class="fas fa-qrcode" aria-hidden="true"></i>
+      <span>Camera inactive</span>
+    </div>
+  </div>
+
+  <!-- CONTROLS -->
+  <div class="px-4 d-flex flex-column gap-2 mb-3">
+    <button class="start-btn" id="startBtn" data-h-click="spoc/scan:3">
+      <i class="fas fa-camera me-2"></i>Start camera
+    </button>
+    <button class="stop-btn" id="stopBtn" data-h-click="spoc/scan:4">
+      <i class="fas fa-stop me-2"></i>Stop camera
+    </button>
+  </div>
+  {% endif %}
+</div>
+
+<!-- MANUAL CHECK-IN TAB VIEW -->
+<div id="manualView" style="display:none;">
+  {% if checkin.key == 'over' %}
+  {#- After the event: mark who came but wasn't scanned, then issue certificates again (UPG-378) -#}
+  <div class="callout callout--brand mx-3 mt-3" data-late-checkin-note>
+    <i class="fas fa-circle-info" aria-hidden="true"></i>
+    <span>The event ended on {{ checkin.last }}. Mark present anyone who came but wasn't scanned.
+      Then open <a href="/certificates/events/{{ event_id }}">Certificates</a> and issue them again: only the people
+      newly marked present get one, nobody gets a second.</span>
+  </div>
+  {% endif %}
+  <!-- SEARCH -->
+  <div class="search-wrap">
+    <div class="search-box-custom">
+      <i class="fas fa-search"></i>
+      <input aria-label="Search by name, email, or team" type="text" id="searchInput" placeholder="Search by name, email, or team..." data-h-input="spoc/scan:5">
+    </div>
+  </div>
+
+  <!-- FILTERS -->
+  <div class="filter-pills-wrap">
+    <button class="filter-pill active" id="pillAll" data-h-click="spoc/scan:6">All</button>
+    <button class="filter-pill" id="pillAbsent" data-h-click="spoc/scan:7">Absent</button>
+    <button class="filter-pill" id="pillPresent" data-h-click="spoc/scan:8">Checked In</button>
+  </div>
+
+  <!-- LIST -->
+  <div class="manual-list" id="manualList">
+    <!-- Rendered dynamically -->
+  </div>
+</div>
+
+<!-- RESULT PANEL -->
+<div class="result-panel" id="resultPanel" role="status" aria-live="polite">
+  <div class="rp-icon" id="rpIcon"></div>
+  <div class="rp-status" id="rpStatus"></div>
+  <div class="rp-detail" id="rpDetail"></div>
+  <div class="rp-name" id="rpName"></div>
+  <div class="rp-time" id="rpTime"></div>
+  <a class="btn btn-light btn-sm mt-2" id="rpBadge" target="_blank" rel="noopener" hidden>
+    <i class="fas fa-id-badge me-1" aria-hidden="true"></i>Print badge</a>
+</div>
+
+<!-- LOG -->
+<div class="log-section">
+  <div class="log-title"><i class="fas fa-history me-1"></i> Recent scans</div>
+  <div class="log-list" id="logList">
+    <div class="list-empty">No scans yet</div>
+  </div>
+</div>
+
+<script integrity="sha384-c9d8RFSL+u3exBOJ4Yp3HUJXS4znl9f+z66d1y54ig+ea249SpqR+w1wyvXz/lk+" crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="/static/js/escape.js"></script>
+<script nonce="{{ csp_nonce() }}">
+const EVENT_ID        = {{ event_id | tojson }};
+const CHECKIN_OVER    = {{ (checkin.key == 'over') | tojson }};   // after the event: Mark present (UPG-378)
+const CSRF_TOKEN      = document.querySelector('meta[name="csrf-token"]')?.content || '';
+const registrations   = {{ registrations | tojson }};
+let scanner           = null;
+let scanning          = false;
+let cooldown          = false;
+let presentCount      = {{ present_count }};
+let totalCount        = {{ total_count }};
+let audioCtx          = null;
+let currentTab        = 'scan';
+let searchFilter      = '';
+let statusFilter      = 'all';
+let resultTimeout     = null;
+
+function setTab(tab) {
+  currentTab = tab;
+  document.getElementById('btnTabScan').classList.toggle('active', tab === 'scan');
+  document.getElementById('btnTabManual').classList.toggle('active', tab === 'manual');
+  
+  document.getElementById('scanView').style.display = tab === 'scan' ? 'block' : 'none';
+  document.getElementById('manualView').style.display = tab === 'manual' ? 'block' : 'none';
+  
+  if (tab === 'manual') {
+    renderManualList();
+  }
+}
+
+function updateProgress() {
+  const pct = totalCount > 0 ? Math.round((presentCount / totalCount) * 100) : 0;
+  document.getElementById('progressText').textContent = pct + '%';
+  document.getElementById('progressBar').style.width = pct + '%';
+}
+
+function onSearchChange() {
+  searchFilter = document.getElementById('searchInput').value.toLowerCase().strip ? 
+    document.getElementById('searchInput').value.toLowerCase().trim() : 
+    document.getElementById('searchInput').value.toLowerCase();
+  renderManualList();
+}
+
+function setFilter(filter) {
+  statusFilter = filter;
+  document.getElementById('pillAll').classList.toggle('active', filter === 'all');
+  document.getElementById('pillAbsent').classList.toggle('active', filter === 'absent');
+  document.getElementById('pillPresent').classList.toggle('active', filter === 'present');
+  renderManualList();
+}
+
+function renderManualList() {
+  const container = document.getElementById('manualList');
+  container.innerHTML = '';
+  
+  const filtered = registrations.filter(r => {
+    // 1. Search Query filter
+    const matchesSearch = !searchFilter || 
+      r.lead_name.toLowerCase().includes(searchFilter) || 
+      r.lead_email.toLowerCase().includes(searchFilter) || 
+      r.team_name.toLowerCase().includes(searchFilter);
+      
+    // 2. Attendance Status filter
+    let matchesStatus = true;
+    if (statusFilter === 'present') {
+      matchesStatus = r.attendance === 'Present';
+    } else if (statusFilter === 'absent') {
+      matchesStatus = r.attendance !== 'Present';
+    }
+    
+    return matchesSearch && matchesStatus;
+  });
+  
+  if (filtered.length === 0) {
+    container.innerHTML = '<div class="list-empty">No participants found</div>';
+    return;
+  }
+  
+  filtered.forEach(r => {
+    const item = document.createElement('div');
+    item.className = 'manual-item';
+    
+    let deliveryBadgeHtml = '';
+    const dStatus = r.delivery_status || 'Unknown';
+    if (dStatus === 'Sent') {
+      deliveryBadgeHtml = ` <span class="badge bg-secondary text-white delivery-badge"><i class="fas fa-paper-plane me-1"></i>Sent</span>`;
+    } else if (dStatus === 'Delivered') {
+      deliveryBadgeHtml = ` <span class="badge bg-info text-dark delivery-badge"><i class="fas fa-check-double me-1"></i>Delivered</span>`;
+    } else if (dStatus === 'Opened') {
+      deliveryBadgeHtml = ` <span class="badge bg-success text-white delivery-badge"><i class="fas fa-envelope-open me-1"></i>Opened</span>`;
+    } else if (dStatus === 'Bounced') {
+      deliveryBadgeHtml = ` <span class="badge bg-danger text-white delivery-badge"><i class="fas fa-exclamation-triangle me-1"></i>Bounced</span>`;
+    }
+
+    // Registrants typed these: escape them (BLK-19)
+    const nameHtml = escapeHtml(r.lead_name) + (r.team_name ? ` · <span class="team-name">${escapeHtml(r.team_name)}</span>` : '');
+    const subHtml = escapeHtml(r.lead_email) + deliveryBadgeHtml;
+    
+    let actionHtml = '';
+    if (r.attendance === 'Present') {
+      actionHtml = `<span class="manual-status status-present"><i class="fas fa-check-circle"></i> Checked In</span>`;
+    } else {
+      actionHtml = `<button class="manual-btn" id="btn-${escapeHtml(r.id)}" data-h-click="se:call" data-call="manualCheckIn" data-args="${escapeHtml(JSON.stringify([r.id]))}"><i class="fas fa-user-check"></i> ${CHECKIN_OVER ? 'Mark present' : 'Check In'}</button>`;
+    }
+    
+    item.innerHTML = `
+      <div>
+        <div class="manual-name">${nameHtml}</div>
+        <div class="manual-sub">${subHtml}</div>
+      </div>
+      <div>
+        ${actionHtml}
+      </div>
+    `;
+    container.appendChild(item);
+  });
+}
+
+async function manualCheckIn(regId) {
+  const item = registrations.find(r => r.id === regId);
+  if (!item) return;
+  
+  if (CHECKIN_OVER && !confirm(`Mark ${item.team_name || item.lead_name} present? Only for someone who came but wasn't scanned. `
+                               + 'They are marked present for the whole event and can then get the participation certificate.')) return;
+  const btn = document.getElementById(`btn-${regId}`);
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+  }
+  
+  try {
+    const send = extra => fetch(`/spoc/api/checkin/${EVENT_ID}/${regId}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': CSRF_TOKEN,
+      },
+      body: JSON.stringify(CHECKIN_OVER ? Object.assign({ late: true }, extra) : {}),
+    });
+    let data = await (await send({})).json();
+    // After the event the SPOC may mark a team the entry list left out, if they confirm it came (UPG-380)
+    if (data.status === 'not_selected' && data.can_override) {
+      if (!confirm(data.message)) return;            // left as it was; the list is drawn again below
+      data = await (await send({ override_entry_list: true })).json();
+    }
+    showResult(data.status, data);
+    addLog(data.status, data);
+    
+    if (data.status === 'success') {
+      item.attendance = 'Present';
+      item.checkin_time = data.checkin_time || new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+      presentCount++;
+      document.getElementById('presentCount').textContent = presentCount;
+      updateProgress();
+    }
+  } catch (err) {
+    showResult('invalid', { message: 'Network error — try again' });
+  } finally {
+    renderManualList();
+  }
+}
+
+function playScanSound(type) {
+  try {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+    
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    
+    const now = audioCtx.currentTime;
+    
+    if (type === 'success') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, now); // D5
+      osc.frequency.setValueAtTime(880, now + 0.1); // A5
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+      osc.start(now);
+      osc.stop(now + 0.35);
+      
+      if (navigator.vibrate) {
+        navigator.vibrate([80, 50, 80]);
+      }
+    } else if (type === 'warning' || type === 'already_in') {
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(440, now); // A4
+      osc.frequency.setValueAtTime(349.23, now + 0.15); // F4
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+      osc.start(now);
+      osc.stop(now + 0.4);
+      
+      if (navigator.vibrate) {
+        navigator.vibrate(200);
+      }
+    } else {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(150, now);
+      osc.frequency.linearRampToValueAtTime(100, now + 0.3);
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+      osc.start(now);
+      osc.stop(now + 0.35);
+      
+      if (navigator.vibrate) {
+        navigator.vibrate([300, 100, 300]);
+      }
+    }
+  } catch (e) {
+    console.warn("Web Audio API blocked or not supported: ", e);
+  }
+}
+
+// Every scan goes through the shared check-in (UPG-02); it takes the ticket
+// link or code, never a registration ID.
+async function onQRDetected(decoded) {
+  if (cooldown) return;
+  triggerCooldown(3000);
+
+  try {
+    // Session mode (UPG-159): the same ticket, recorded at the chosen session
+    const sessionId = document.getElementById('scanMode')?.value || '';
+    const post = (extra) => fetch(sessionId ? '/ticket/api/session_checkin' : '/ticket/api/checkin', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': CSRF_TOKEN,
+      },
+      body: JSON.stringify(Object.assign({ token: decoded, event_id: EVENT_ID, session_id: sessionId,
+                                           source: 'spoc scanner' }, extra || {})),
+    });
+    let data = await (await post()).json();
+    if (data.status === 'session_full' && confirm(data.message + '\n\nAdmit anyway?')) {
+      data = await (await post({ allow_over: true })).json();
+    }
+    showResult(data.status, data);
+    addLog(data.status, data);
+
+    if (data.status === 'success' && (!sessionId || data.entered_event)) {
+      // Find and update item locally if it exists
+      const item = registrations.find(r => r.id === data.reg_id || r.reg_id === data.reg_id);
+      if (item) {
+        item.attendance = 'Present';
+        item.checkin_time = data.checkin_time;
+      } else {
+        // Fallback: push dynamic new attendee if not in list
+        registrations.push({
+          id: data.reg_id,
+          lead_name: data.name || 'Unknown',
+          lead_email: '',
+          team_name: data.team || '',
+          attendance: 'Present',
+          checkin_time: data.checkin_time
+        });
+      }
+      presentCount++;
+      document.getElementById('presentCount').textContent = presentCount;
+      updateProgress();
+    }
+  } catch (err) {
+    showResult('invalid', { message: 'Network error — try again' });
+  }
+}
+
+function showResult(status, data) {
+  playScanSound(status);
+  const panel  = document.getElementById('resultPanel');
+  const icon   = document.getElementById('rpIcon');
+  const stat   = document.getElementById('rpStatus');
+  const detail = document.getElementById('rpDetail');
+  const name   = document.getElementById('rpName');
+  const time   = document.getElementById('rpTime');
+
+  if (resultTimeout) clearTimeout(resultTimeout);
+
+  panel.className = 'result-panel';
+  icon.textContent = '';
+  name.textContent = '';
+  time.textContent = '';
+
+  const badge = document.getElementById('rpBadge');   // UPG-158
+  badge.hidden = !((status === 'success' || status === 'already_in') && data?.badge_url);
+  if (!badge.hidden) badge.href = data.badge_url;
+  if (status === 'success') {
+    panel.classList.add('result-panel', 'rp-success');
+    icon.innerHTML  = '<i class="fas fa-circle-check" aria-hidden="true"></i>';
+    stat.textContent  = 'Entry Granted!';
+    detail.textContent = data?.message || '';
+    if (data?.name) name.textContent = data.name + (data.team ? ` · ${data.team}` : '');
+    if (data?.checkin_time) time.textContent = `Checked in at ${data.checkin_time}`;
+  } else if (status === 'already_in') {
+    panel.classList.add('result-panel', 'rp-already');
+    icon.innerHTML  = '<i class="fas fa-triangle-exclamation" aria-hidden="true"></i>';
+    stat.textContent  = 'Already Checked In';
+    detail.textContent = data?.message || '';
+    if (data?.name) name.textContent = data.name;
+    if (data?.checkin_time) time.textContent = `Scanned earlier at ${data.checkin_time}`;
+  } else {
+    panel.classList.add('result-panel', 'rp-invalid');
+    icon.innerHTML  = '<i class="fas fa-circle-xmark" aria-hidden="true"></i>';
+    stat.textContent  = {unpaid: 'Payment Pending', wrong_event: 'Different Event', forbidden: 'Not Allowed',
+                         session_full: 'Session Full'}[status] || 'Invalid Ticket';
+    detail.textContent = data?.message || 'This QR code is not valid for this event.';
+  }
+
+  panel.style.display = 'block';
+  resultTimeout = setTimeout(() => { panel.style.display = 'none'; }, 4000);
+}
+
+function addLog(status, data) {
+  const list = document.getElementById('logList');
+  const placeholder = list.querySelector('.list-empty');
+  if (placeholder) placeholder.remove();
+
+  const dot   = status === 'success' ? 'ld-green' : status === 'already_in' ? 'ld-yellow' : 'ld-red';
+  const label = status === 'success' ? 'Entry granted' : status === 'already_in' ? 'Already in' : 'Invalid';
+  const nameText = data?.name || 'Unknown';
+  const now   = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+
+  const item = document.createElement('div');
+  item.className = 'log-item';
+  item.innerHTML = `
+    <span class="log-dot ${escapeHtml(dot)}"></span>
+    <span class="log-name">${escapeHtml(nameText)}</span>
+    <span class="log-time">${escapeHtml(now)} · ${escapeHtml(label)}</span>
+  `;
+  list.insertBefore(item, list.firstChild);
+}
+
+function triggerCooldown(ms) {
+  cooldown = true;
+  setTimeout(() => { cooldown = false; }, ms);
+}
+
+function startScanner() {
+  document.getElementById('placeholder').style.display = 'none';
+  document.getElementById('qr-reader').style.display   = 'block';
+  document.getElementById('startBtn').style.display    = 'none';
+  document.getElementById('stopBtn').style.display     = 'block';
+
+  scanner = new Html5Qrcode('qr-reader');
+  scanner.start(
+    { facingMode: 'environment' },
+    { fps: 10, qrbox: { width: 260, height: 260 }, aspectRatio: 1.0 },
+    onQRDetected,
+    () => {}
+  ).catch(err => {
+    console.error('Camera error:', err);
+    alert('Could not access camera. Please allow camera permission and try again.');
+    stopScanner();
+  });
+  scanning = true;
+}
+
+function stopScanner() {
+  if (scanner && scanning) {
+    scanner.stop().then(() => {
+      scanner.clear();
+      scanner = null;
+      scanning = false;
+    });
+  }
+  document.getElementById('qr-reader').style.display   = 'none';
+  document.getElementById('placeholder').style.display = 'flex';
+  document.getElementById('startBtn').style.display    = 'block';
+  document.getElementById('stopBtn').style.display     = 'none';
+}
+
+// Initial stats progress bar load
+updateProgress();
+</script>
+{% endblock %}
+{% block handler_scripts %}{{ super() }}<script src="/static/js/handlers/spoc__scan.js"></script>{% endblock %}

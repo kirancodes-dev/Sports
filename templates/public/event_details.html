@@ -1,0 +1,93 @@
+{% extends "base_classic.html" %}
+{#- Public event page (UPG-63): app layout, navy event hero, light content. -#}
+{% set hide_page_head = true %}
+{% set app_active = 'events' %}
+{% block robots %}index, follow{% endblock %}
+{% block title %}{{ event.title }}{% endblock %}
+{% block meta_description %}{{ (event.description or event.title)|truncate(155) }}{% endblock %}
+{% block extra_css %}
+    <link href="/static/css/event-details.css" rel="stylesheet">
+    {#- Share cards and schema.org Event data, built and JSON-encoded in services_reach (UPG-146) -#}
+    {% set share = share_meta(event) %}
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="{{ share.title }}">
+    <meta property="og:description" content="{{ share.description }}">
+    <meta property="og:url" content="{{ share.url }}">
+    <meta property="og:image" content="{{ share.image }}">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ share.title }}">
+    <meta name="twitter:description" content="{{ share.description }}">
+    <meta name="twitter:image" content="{{ share.image }}">
+    <script type="application/ld+json" nonce="{{ csp_nonce() }}">{{ share.json_ld|tojson }}</script>
+{% endblock %}
+{% block content %}
+{% include "public/_event_content.html" %}
+
+<!-- STICKY REGISTRATION BAR (a fest has none: people register for its events) -->
+{% if not event.is_fest %}
+<div class="reg-bar">
+    <div class="reg-bar__inner">
+        <div class="d-none d-md-block">
+            <div class="reg-bar__label">Registration fee</div>
+            <div class="reg-bar__fee">
+                {% if event.fees and event.fees.regular and event.fees.regular|int > 0 %}
+                ₹{{ event.fees.regular }}
+                {% else %}
+                <span class="free">Free</span>
+                {% endif %}
+            </div>
+        </div>
+        {% if is_registered %}
+        <button type="button" class="btn btn-lg btn-outline-success" disabled>
+            <i class="fas fa-check-circle" aria-hidden="true"></i> Already registered
+        </button>
+        {% else %}
+        {# The event's own registration form applies the same state (UPG-34, UPG-266); the block follows
+           the state while the page stays open (UPG-267) #}
+        <div class="text-end" data-live-reg data-live-event="{{ event.id }}" data-reg-state="{{ reg_state.key }}">
+            <a class="btn btn-lg btn-gold" {% if reg_state.action %}href="{{ reg_state.action_url }}"{% else %}hidden{% endif %} data-live-action data-live-register="Register now" data-reg-action="{{ reg_state.action }}">
+                <span data-live-action-label>{{ 'Register now' if reg_state.action == 'register' else reg_state.action_label }}</span> <i class="fas fa-arrow-right" aria-hidden="true"></i>
+            </a>
+            <span class="btn btn-lg btn-outline-secondary disabled" aria-disabled="true" data-live-locked {% if reg_state.action %}hidden{% endif %}><i class="fas fa-lock" aria-hidden="true"></i> <span data-live-label>{{ reg_state.label }}</span></span>
+            <div class="small mt-1" data-reg-explanation data-live-explanation aria-live="polite">{{ reg_state.explanation }}</div>
+            <div class="small text-muted" data-live-status="stale-only" role="status" hidden></div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+{% block extra_js %}
+{% include "layouts/_bootstrap_js.html" %}
+<script nonce="{{ csp_nonce() }}">
+// ── COUNTDOWN ────────────────────────────────────────
+(function(){
+    var t = new Date("{{ event.date }}T{{ event.time or '09:00' }}");
+    if(isNaN(t)){document.getElementById('cd-band').style.display='none';return;}
+    function tick(){
+        var diff = t - new Date();
+        if(diff <= 0){
+            document.getElementById('cd-inner').innerHTML = '<span class="cd-live"><i class="fas fa-circle" aria-hidden="true"></i> Event is live or completed</span>';
+            return;
+        }
+        var d=Math.floor(diff/86400000), h=Math.floor(diff%86400000/3600000),
+            m=Math.floor(diff%3600000/60000), s=Math.floor(diff%60000/1000);
+        document.getElementById('cd-d').textContent = String(d).padStart(2,'0');
+        document.getElementById('cd-h').textContent = String(h).padStart(2,'0');
+        document.getElementById('cd-m').textContent = String(m).padStart(2,'0');
+        document.getElementById('cd-s').textContent = String(s).padStart(2,'0');
+    }
+    tick(); setInterval(tick,1000);
+})();
+
+// ── SHARE: the links are built on the server (UPG-92); copying uses this page's address
+function copyLink(){
+    navigator.clipboard.writeText({{ share_url|tojson }}).then(function(){
+        var b=document.getElementById('s-cp');
+        b.classList.add('copied'); b.innerHTML='<i class="fas fa-check" aria-hidden="true"></i> Copied';
+        setTimeout(function(){b.classList.remove('copied');b.innerHTML='<i class="fas fa-link" aria-hidden="true"></i> Copy link';},2000);
+    });
+}
+</script>
+{% endblock %}
+{% block handler_scripts %}{{ super() }}<script src="/static/js/live-refresh.js"></script><script src="/static/js/handlers/public__event_details.js"></script>{% endblock %}

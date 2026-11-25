@@ -1,0 +1,44 @@
+{#
+  Reusable social share strip (styles: global.css, UPG-63).
+  Parameters (set before including):
+    share_title  — text for the post (e.g. "I just won 1st place at HackFest 2025!")
+    share_url    — full URL to share (default: current page)
+    share_label  — heading above the buttons (default: "Share")
+#}
+{% set _st = share_title | default('Check out SapthaEvent — Sapthagiri NPS University') %}
+{% set _su = share_url   | default('') %}
+{% set _sl = share_label | default('Share') %}
+
+<div class="share-strip-wrap">
+  <p class="share-strip-wrap__label"><i class="fas fa-share-alt me-1" aria-hidden="true"></i>{{ _sl }}</p>
+  <div class="share-strip-wrap__btns">
+    <a class="shr-btn shr-li btn btn-outline-secondary btn-sm" href="#" target="_blank" rel="noopener"
+       data-title="{{ _st }}" data-url="{{ _su }}">
+      <i class="fab fa-linkedin-in" aria-hidden="true"></i> LinkedIn
+    </a>
+    <a class="shr-btn shr-wa btn btn-outline-secondary btn-sm" href="#" target="_blank" rel="noopener"
+       data-title="{{ _st }}" data-url="{{ _su }}">
+      <i class="fab fa-whatsapp" aria-hidden="true"></i> WhatsApp
+    </a>
+    <a class="shr-btn shr-tw btn btn-outline-secondary btn-sm" href="#" target="_blank" rel="noopener"
+       data-title="{{ _st }}" data-url="{{ _su }}">
+      <i class="fab fa-x-twitter" aria-hidden="true"></i> X
+    </a>
+    <a class="shr-btn shr-fb btn btn-outline-secondary btn-sm" href="#" target="_blank" rel="noopener"
+       data-title="{{ _st }}" data-url="{{ _su }}">
+      <i class="fab fa-facebook-f" aria-hidden="true"></i> Facebook
+    </a>
+    <button type="button" class="shr-btn shr-cp btn btn-outline-secondary btn-sm" data-h-click="includes/share_strip:1"
+       data-url="{{ _su }}">
+      <i class="fas fa-link" aria-hidden="true"></i> Copy link
+    </button>
+    <button type="button" data-h-click="includes/share_strip:2"
+       data-title="{{ _st }}" data-url="{{ _su }}"
+       class="shr-btn shr-native btn btn-primary btn-sm" style="display:none;">
+      <i class="fas fa-share" aria-hidden="true"></i> Share
+    </button>
+  </div>
+</div>
+
+<script src="/static/js/pages/includes__share_strip.js"></script>
+<script src="/static/js/handlers/includes__share_strip.js"></script>

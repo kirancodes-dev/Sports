@@ -1,0 +1,89 @@
+{#- The app layout for signed-in and content pages (UPG-63, on the shared
+    document from UPG-23): the navy app bar with the official logo and the
+    role's links, a page header, flash messages, content and the footer.
+
+    Blocks: title, meta_description, page_title, page_sub, page_actions,
+    breadcrumbs, content, extra_css, extra_js, handler_scripts.
+    Optional variables (set in the page or passed by the route):
+      app_title   — the workspace name in the app bar (default: by role)
+      app_subtitle — a second line under it (e.g. the event)
+      app_active  — which app-bar link is current (dashboard, users, …)
+      app_back    — (url, label) for a back link in the app bar
+      app_cta     — (url, icon, label): the page's one gold action
+      hide_page_head — true when the page draws its own header -#}
+{% extends "layouts/document.html" %}
+{% from "includes/ui.html" import app_bar with context %}
+{% block head %}
+    <meta name="theme-color" content="#00185e">
+    <meta name="description" content="{% block meta_description %}SapthaEvent: Official event management portal for Sapthagiri NPS University. Manage events, register participants, and track event attendance.{% endblock %}">
+    <meta name="author" content="Sapthagiri NPS University">
+    <meta name="robots" content="{% block robots %}noindex, follow{% endblock %}">
+    <link rel="canonical" href="https://events.snpsu.edu.in">
+    {% include 'includes/pwa_head.html' %}
+    <title>{% block title %}Page Title{% endblock %} | SapthaEvent</title>
+    {% include "layouts/_bootstrap_css.html" %}
+    {% include "layouts/_fontawesome.html" %}
+    <link href="/static/css/global.css" rel="stylesheet">
+    <script src="/static/js/escape.js"></script>
+    {% block extra_css %}{% endblock %}
+{% endblock %}
+{% block body %}
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+    <!-- Live region for screen-reader announcements -->
+    <div id="a11y-announcer" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
+
+    {% call app_bar(app_title, subtitle=app_subtitle, active=app_active or current_page, back=app_back, cta=app_cta) %}
+        <button type="button" class="app-bar__link" data-h-click="palette:open" title="Search (Ctrl+K)" aria-label="Search pages">
+            <i class="fas fa-search" aria-hidden="true"></i>
+        </button>
+        {% if session.get('user_id') %}
+        <div class="notif-wrap" id="notif-wrap">
+            <button type="button" class="app-bar__link" id="bell-btn" data-h-click="notif:toggle" aria-label="Notifications" aria-expanded="false" aria-controls="notif-panel" title="Notifications">
+                <i class="fas fa-bell" aria-hidden="true"></i>
+                <span id="notif-badge" class="badge-count" style="display:none;"></span>
+            </button>
+            <div id="notif-panel" class="notif-panel" hidden>
+                <div class="notif-panel__head">
+                    <span><i class="fas fa-bell" aria-hidden="true"></i> Notifications</span>
+                    <button type="button" class="btn btn-link btn-sm p-0" data-h-click="notif:mark-all">Mark all read</button>
+                </div>
+                <div id="notif-list" class="notif-panel__list" aria-live="polite"><div class="notif-empty">Loading…</div></div>
+            </div>
+        </div>
+        {% endif %}
+        <button class="app-bar__link" data-h-click="base_classic:1" aria-label="Switch between light and dark theme" id="theme-toggle" type="button" title="Theme">
+            <span id="theme-toggle-icon"><i class="fas fa-moon" aria-hidden="true"></i></span>
+        </button>
+    {% endcall %}
+
+    <main class="app-main" id="main-content" role="main">
+        {% if not hide_page_head %}
+        <div class="page-head">
+            <div class="page-head__text">
+                {% block breadcrumbs %}{% endblock %}
+                <h1 class="page-head__title" id="page-title">{% block page_title %}{{ self.title() }}{% endblock %}</h1>
+                {% set _sub = self.page_sub() %}
+                {% if _sub | trim %}<p class="page-head__sub">{{ _sub }}</p>{% endif %}
+            </div>
+            {% set _actions = self.page_actions() %}
+            {% if _actions | trim %}<div class="page-head__actions">{{ _actions }}</div>{% endif %}
+        </div>
+        {% endif %}
+        {% include 'includes/flash_messages.html' %}
+        {% block content %}{% endblock %}
+    </main>
+    {% include 'includes/site_footer.html' %}
+
+    <script src="/static/js/pages/base_classic.js"></script>
+    <script src="/static/js/global.js"></script>
+    <script src="/static/js/command-palette.js"></script>
+    <script src="/static/js/notifications.js"></script>
+    <script src="/static/js/offline-sync.js" defer></script>
+    {% include 'components/mobile_nav.html' %}
+    {% block extra_js %}{% endblock %}
+{% endblock %}
+{# Registered here, printed in the page header above via self.page_sub() / self.page_actions() #}
+{% if false %}{% block page_sub %}{% endblock %}{% block page_actions %}{% endblock %}{% endif %}
+{# The layout draws its own footer inside the body #}
+{% block site_footer %}{% endblock %}
+{% block handler_scripts %}{{ super() }}<script src="/static/js/handlers/base_classic.js"></script>{% endblock %}

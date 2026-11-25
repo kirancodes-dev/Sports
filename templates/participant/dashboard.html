@@ -1,0 +1,582 @@
+{% extends "base_classic.html" %}
+{#- Student dashboard (UPG-63): the app layout and portal design system, keeping the
+    LMS-style profile card, metrics, tickets, past events and discovery sections.
+    Notifications and search come from the shared app bar. Missing profile fields
+    show "—" instead of the sample values the page used to fill in. -#}
+{% import 'includes/ui.html' as ui with context %}
+{% set app_active = 'dashboard' %}
+{% set hide_page_head = true %}
+{% block title %}Student dashboard{% endblock %}
+{% block meta_description %}Personal student event dashboard — tickets, scores, participation and progress.{% endblock %}
+{% block extra_css %}
+<style>
+.portal-filter-pills { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; margin-bottom: var(--sp-5); scrollbar-width: none; }
+.portal-filter-pills::-webkit-scrollbar { display: none; }
+.portal-filter-pills .seg__btn { flex: 0 0 auto; }
+.event-doc-instructions { white-space: pre-line; overflow-wrap: anywhere; }   /* UPG-239 */
+.portal-hero-meta-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.portal-hero-meta-item { font-size: var(--fs-sm); color: var(--text-muted); background: var(--surface-sunken); border: 1px solid var(--divider); border-radius: var(--radius-sm); padding: 4px 10px; }
+.portal-hero-meta-item strong { color: var(--text-strong); }
+/* Three widgets side by side on wide screens, stacked below 992px. This rule
+   used to open a media query it never closed, trapping every rule below it
+   on small screens only (UPG-104). */
+.portal-widgets-grid { display: grid; grid-template-columns: 1fr 1fr 1.6fr; gap: var(--grid-gap); margin-bottom: var(--section-gap); }
+@media (max-width: 991.98px) { .portal-widgets-grid { grid-template-columns: minmax(0, 1fr); } }
+.portal-widget-card { min-width: 0; }
+.ticket-header-lms { flex-wrap: wrap; }
+.ticket-chip-cancelled { background: var(--danger-soft); color: var(--danger-text); }
+.portal-filter-pills .seg__count { font-size: var(--fs-xs); opacity: .75; margin-left: 4px; font-variant-numeric: tabular-nums; }
+.portal-widget-card { display: flex; flex-direction: column; }
+.portal-widget-header { font-family: var(--font-heading); font-size: var(--fs-md); font-weight: 700; color: var(--text-strong); margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.score-metric-value { font-family: var(--font-heading); font-size: 2.2rem; font-weight: 800; color: var(--brand-ink); line-height: 1; font-variant-numeric: tabular-nums; }
+.score-metric-label { font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--text-subtle); margin-bottom: 6px; }
+.mini-reg { background: var(--surface-sunken); border: 1px solid var(--divider); border-radius: var(--radius-sm); padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--fs-sm); font-weight: 600; color: var(--text-strong); }
+.mini-reg span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attendance-metric-layout { display: flex; align-items: center; gap: 24px; flex: 1; }
+@media (max-width: 500px) { .attendance-metric-layout { flex-direction: column; } }
+.donut-chart-box { position: relative; width: 116px; height: 116px; flex-shrink: 0; }
+.donut-chart-box svg { width: 116px; height: 116px; transform: rotate(-90deg); }
+.donut-chart-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.donut-chart-center-num { font-family: var(--font-heading); font-size: 1.2rem; font-weight: 800; color: var(--text-strong); font-variant-numeric: tabular-nums; }
+.donut-chart-center-sub { font-size: var(--fs-xs); color: var(--text-subtle); }
+.category-bars-list { flex: 1; display: flex; flex-direction: column; gap: 12px; width: 100%; }
+.category-bar-header { display: flex; justify-content: space-between; font-size: var(--fs-sm); font-weight: 600; color: var(--text-strong); margin-bottom: 4px; }
+.portal-section-title { font-family: var(--font-heading); font-size: var(--fs-lg); font-weight: 700; color: var(--text-strong); margin: var(--sp-8) 0 var(--sp-4); display: flex; align-items: center; gap: 10px; }
+.portal-section-title i { color: var(--brand-gold-600); }
+.portal-section-count { font-size: var(--fs-xs); font-weight: 700; background: var(--surface-muted); color: var(--text-muted); padding: 2px 8px; border-radius: var(--radius-pill); }
+.ticket-card-lms { background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-xs); margin-bottom: var(--sp-4); overflow: hidden; }
+.ticket-header-lms { padding: 14px 18px; border-bottom: 1px solid var(--divider); display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.ticket-title-lms { font-size: var(--fs-md); margin: 0 0 4px; }
+.ticket-meta-lms { font-size: var(--fs-sm); color: var(--text-subtle); }
+.ticket-body-lms { padding: 16px 18px; }
+.ticket-chip { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); font-weight: 600; padding: 3px 9px; border-radius: var(--radius-pill); }
+.ticket-chip-today { background: var(--brand-gold-100); color: var(--brand-gold-700); }
+.ticket-chip-soon { background: var(--warning-soft); color: var(--warning-text); }
+.ticket-chip-upcoming { background: var(--info-soft); color: var(--info-text); }
+.ticket-chip-past { background: var(--surface-muted); color: var(--text-muted); }
+.ticket-chip-attended { background: var(--success-soft); color: var(--success-text); }
+.ticket-chip-absent { background: var(--danger-soft); color: var(--danger-text); }
+.ticket-chip-room { background: var(--brand-navy-50); color: var(--brand-ink); }
+/* The ticket's other actions, folded under "More" (UPG-366) */
+.ticket-more > summary { list-style: none; }
+.ticket-more > summary::-webkit-details-marker { display: none; }
+.ticket-more[open] { flex-basis: 100%; }
+.ticket-more[open] > summary { margin-bottom: 0.5rem; }
+.ticket-more__list { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.ticket-more__cancel { flex-basis: 100%; margin: 0.25rem 0 0; padding-top: 0.6rem; border-top: 1px dashed var(--border); }
+.qr-box-lms { background: #fff; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; display: inline-flex; flex-direction: column; align-items: center; gap: 6px; }
+.qr-box-lms img { width: 92px; height: 92px; image-rendering: pixelated; }
+.qr-box-lms--locked { background: var(--surface-sunken); border-style: dashed; min-width: 112px; text-align: center; color: var(--text-subtle); }
+.qr-box-lms--locked i { font-size: 1.3rem; }
+.qr-box-lms__id { font-family: var(--font-mono); font-size: 10px; color: var(--text-subtle); line-height: 1.3; }
+.score-box-lms { background: var(--brand-navy-50); border: 1px solid var(--brand-navy-100); border-radius: var(--radius-sm); padding: 12px 16px; display: inline-flex; align-items: center; justify-content: space-between; gap: 20px; cursor: pointer; min-width: 200px; }
+.score-box-lms:hover { border-color: var(--brand-navy); }
+.score-box-lms__label { font-size: var(--fs-xs); font-weight: 700; color: var(--brand-ink); text-transform: uppercase; letter-spacing: .04em; }
+.score-box-lms__value { font-family: var(--font-heading); font-size: 1.5rem; font-weight: 800; color: var(--text-strong); }
+.score-box-lms__value small { font-size: var(--fs-sm); color: var(--text-subtle); }
+.score-box-lms__rank { font-weight: 800; color: var(--brand-gold-700); }
+.members-box { background: var(--surface-sunken); border: 1px solid var(--divider); border-radius: var(--radius-sm); padding: 8px 12px; }
+.past-card { background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.past-card__title { font-weight: 700; color: var(--text-strong); }
+.past-card__meta { font-size: var(--fs-sm); color: var(--text-subtle); margin-top: 2px; }
+.discover-grid-lms { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: var(--grid-gap); }
+.discover-card-lms { background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; display: flex; flex-direction: column; justify-content: space-between; }
+.discover-card-lms__title { font-size: var(--fs-base); margin: 8px 0 4px; }
+.judge-score { background: var(--surface-sunken); border: 1px solid var(--divider); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 10px; }
+.judge-score > div:first-child { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.judge-score__who { font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; color: var(--text-subtle); }
+.judge-score__total { font-family: var(--font-heading); font-size: 1.1rem; font-weight: 800; color: var(--brand-ink); }
+.judge-score__total small { font-size: var(--fs-xs); color: var(--text-subtle); }
+.ref-stats { display: inline-flex; flex-wrap: wrap; gap: 16px; align-items: center; padding: 12px 16px; background: var(--surface-sunken); border: 1px solid var(--divider); border-radius: var(--radius); }
+.ref-stats .lbl { font-size: var(--fs-xs); font-weight: 600; color: var(--text-subtle); text-transform: uppercase; display: block; }
+.ref-stats .val { font-family: var(--font-heading); font-size: 1.25rem; font-weight: 800; color: var(--text-strong); }
+.ref-stats .sep { width: 1px; height: 32px; background: var(--border); }
+</style>
+{% endblock %}
+{% block content %}
+{% set up = (user_profile if user_profile is defined and user_profile else {}) %}
+{% set cc = (cat_counts if cat_counts is defined and cat_counts else {}) %}
+
+{% if session.get('role') in ('SuperAdmin', 'Super Admin') %}
+<div class="callout callout--brand d-flex flex-wrap align-items-center justify-content-between gap-2">
+  <span><i class="fas fa-crown" aria-hidden="true"></i> You are viewing the student dashboard as <strong>Super Admin</strong>.</span>
+  <a href="/admin/dashboard" class="btn btn-primary btn-sm">Return to admin <i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+</div>
+{% endif %}
+
+{#- UPG-294: what the student came for is first: updates, then tickets and events to join;
+    the profile card and the activity figures follow. -#}
+<div class="page-head">
+  <div class="page-head__text">
+    {#- The student's own name says more than "Dashboard" (UPG-297 (c)) -#}
+    {% set first_name = ((user_name or '').split('(')[0].strip().split() or [''])[0] %}
+    <h1 class="page-head__title" id="page-title">{{ ('Hello, ' ~ first_name) if first_name else 'Dashboard' }}</h1>
+    {% if last_updated %}<p class="page-head__sub">Last updated {{ last_updated }}</p>{% endif %}
+  </div>
+  <div class="page-head__actions">
+    <a href="/participant/my_events" class="btn btn-secondary"><i class="fas fa-list" aria-hidden="true"></i> My events</a>
+    <a href="/certificates/mine" class="btn btn-secondary"><i class="fas fa-award" aria-hidden="true"></i> My certificates</a>
+    <a href="/gamification/leaderboard" class="btn btn-secondary"><i class="fas fa-trophy" aria-hidden="true"></i> Ranks</a>
+    <a href="/events" class="btn btn-primary"><i class="fas fa-compass" aria-hidden="true"></i> Browse events</a>
+  </div>
+</div>
+
+{% if announcements %}
+{% for ann in announcements %}
+<div class="callout"><i class="fas fa-bullhorn" aria-hidden="true"></i>{{ ann.message }}</div>
+{% endfor %}
+{% endif %}
+
+{#- UPG-257: teammates who haven't confirmed; maybe the lead mistyped an email -#}
+{% if unconfirmed %}
+<section class="panel mb-4 border-warning" aria-labelledby="unconfirmed-title" data-unconfirmed-reminder>
+  <h2 class="h6 mb-2" id="unconfirmed-title"><i class="fas fa-user-clock me-2 text-warning" aria-hidden="true"></i>Teammates who haven't confirmed</h2>
+  {% for u in unconfirmed %}
+  <p class="small mb-1">{{ u.names|length }} teammate{{ '' if u.names|length == 1 else 's' }} on {{ u.team_name or 'your team' }} ({{ u.event_title }}) {{ 'hasn\'t' if u.names|length == 1 else 'haven\'t' }} confirmed: {{ u.names|join(', ') }}. Check their emails.
+    <a href="/teams/{{ u.reg_id }}" class="ms-1">Open the team page</a></p>
+  {% endfor %}
+</section>
+{% endif %}
+
+{#- UPG-236: where they stand on each waitlist they (or their team) joined -#}
+{% if my_waitlist %}
+{% from "participant/_waitlist.html" import waitlist_cards %}
+<section class="panel mb-4" aria-labelledby="my-waitlist-title" data-dashboard-waitlist>
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+    <h2 class="h6 mb-0" id="my-waitlist-title"><i class="fas fa-hourglass-half me-2 text-warning" aria-hidden="true"></i>Your waitlist</h2>
+    <a href="/participant/my_events?tab=waitlisted" class="small">All in My events</a>
+  </div>
+  {{ waitlist_cards(my_waitlist) }}
+</section>
+{% endif %}
+
+{#- UPG-239: what the organiser gave registered teams: their instructions and a PDF -#}
+{% if event_documents %}
+<section class="panel mb-4" id="event-documents" aria-labelledby="event-documents-title" data-event-documents>
+  <h2 class="h6 mb-2" id="event-documents-title"><i class="fas fa-file-pdf me-2 text-danger" aria-hidden="true"></i>From the organisers</h2>
+  {% for group in event_documents %}
+  <div class="mb-3">
+    <h3 class="h6 fw-bold mb-2">{{ group.event_title }}{% if group.team_name %} <span class="small text-muted fw-normal">· {{ group.team_name | team }}</span>{% endif %}</h3>
+    <ul class="list-unstyled d-grid gap-2 mb-0">
+      {% for d in group.documents %}
+      <li class="border rounded p-3 bg-white" data-event-document="{{ d.id }}">
+        <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+          <h4 class="h6 mb-1">{{ d.title }}</h4>
+          {% if d.pdf_key %}<a class="btn btn-sm btn-primary" href="/participant/event/{{ group.event_id }}/document/{{ d.id }}" download><i class="fas fa-download me-1" aria-hidden="true"></i>Download PDF<span class="visually-hidden">: {{ d.title }}</span></a>{% endif %}
+        </div>
+        {% if d.instructions %}<div class="small event-doc-instructions">{{ d.instructions }}</div>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+{# Tabs from the student's own registrations, with counts (UPG-104) #}
+<div class="portal-filter-pills seg" role="group" aria-label="Filter tickets">
+  {%- for key, label, n in (ticket_tabs or [('all', 'All', 0)]) %}
+  <button type="button" class="seg__btn{% if loop.first %} active{% endif %}" aria-pressed="{{ 'true' if loop.first else 'false' }}" data-filter="{{ key }}">{{ label }}<span class="seg__count">{{ n }}</span></button>
+  {%- endfor %}
+</div>
+<div id="tab-empty" class="empty-state" hidden>
+  <i class="fas fa-filter" aria-hidden="true"></i>
+  <h3>Nothing here yet</h3>
+  <p>No registrations match this tab. <a href="/events" class="fw-semibold">Explore events →</a></p>
+</div>
+
+    <!-- ── ACTIVE TICKETS SECTION ── -->
+    <div id="tickets-section">
+      <div class="portal-section-title">
+        <i class="fas fa-ticket-alt" aria-hidden="true"></i>
+        <span>My active tickets</span>
+        <span class="portal-section-count">{{ active_tickets|length }}</span>
+      </div>
+
+      {% if active_tickets %}
+      {% for reg in active_tickets %}
+      <div class="ticket-card-lms" data-ticket="active" data-category="{{ reg.cat_key }}">
+        <div class="ticket-header-lms">
+          <div style="flex:1;min-width:0;">
+            <h3 class="ticket-title-lms">{{ reg.event_title }}</h3>
+            <div class="ticket-meta-lms">
+              <i class="fas fa-calendar-alt me-1"></i> {{ (reg.event_date or 'TBD')|day }}
+              &nbsp;·&nbsp;
+              <i class="fas fa-map-marker-alt me-1"></i> {{ reg.event_venue or 'Venue to be announced' }}
+            </div>
+          </div>
+          {% set ps = reg.get('payment_status','Free') %}
+          <span class="se-badge {{ 'se-badge--success' if ps == 'Paid' else 'se-badge--warning' if ps == 'Pending' else 'se-badge--brand' }}">{{ ps }}</span>
+        </div>
+
+        <div class="ticket-body-lms">
+          {#- UPG-227: whose team this is, for a member and the lead alike -#}
+          {% if reg.team_code or (reg.members and reg.members|length > 1) %}
+          <div class="small mb-2" data-my-team="{{ 'lead' if reg.is_lead else 'member' }}">
+            <i class="fas fa-users me-1" aria-hidden="true"></i>
+            {% if reg.is_lead %}You lead <strong>{{ reg.team_name or 'your team' }}</strong>{% if reg.team_code %} · invite code <strong>{{ reg.team_code }}</strong>{% endif %}
+            {% else %}You're a member of <strong>{{ reg.team_name or 'a team' }}</strong>, led by {{ reg.lead_name or reg.lead_email }}{% endif %}
+          </div>
+          {% if not reg.is_lead and not reg.is_cancelled %}
+          <div class="text-muted small mb-2" data-ask-lead>Something wrong in your details? Ask your team lead, {{ reg.lead_name or 'the lead' }}{% if reg.lead_email %} ({{ reg.lead_email }}){% endif %}, to correct it.</div>
+          {% endif %}
+          {% endif %}
+          <div class="d-flex flex-wrap gap-2 mb-3">
+            {% if reg.happening_now %}
+                <span class="ticket-chip ticket-chip-today" data-happening-now><i class="fas fa-bolt"></i>Happening now</span>
+            {% elif reg.days_until is not none %}
+              {% if reg.days_until == 0 %}
+                <span class="ticket-chip ticket-chip-today"><i class="fas fa-star"></i>Today!</span>
+              {% elif reg.days_until < 0 %}
+                <span class="ticket-chip ticket-chip-past"><i class="fas fa-check"></i>Completed</span>
+              {% elif reg.days_until <= 3 %}
+                <span class="ticket-chip ticket-chip-soon"><i class="fas fa-fire"></i>{{ reg.days_until }} day{{ 's' if reg.days_until != 1 }} away</span>
+              {% else %}
+                <span class="ticket-chip ticket-chip-upcoming"><i class="fas fa-clock"></i>{{ reg.days_until }} days away</span>
+              {% endif %}
+            {% endif %}
+
+            {% if reg.my_attendance == 'Present' %}
+              <span class="ticket-chip ticket-chip-attended"><i class="fas fa-check-circle"></i>Attended</span>
+            {% elif reg.my_attendance == 'Absent' %}
+              <span class="ticket-chip ticket-chip-absent"><i class="fas fa-times-circle"></i>Absent</span>
+            {% endif %}
+
+            {% if reg.my_room %}
+              <span class="ticket-chip ticket-chip-room" data-my-room><i class="fas fa-door-open"></i>Room {{ reg.my_room }}</span>
+            {% endif %}
+
+            {% if reg.round_status %}{# multi-round events (UPG-149) #}
+              <span class="ticket-chip {{ 'ticket-chip-attended' if reg.round_status.tone == 'success' else 'ticket-chip-past' if reg.round_status.tone == 'muted' else 'ticket-chip-upcoming' }}" data-round-status>
+                <i class="fas fa-layer-group" aria-hidden="true"></i>{{ reg.round_status.label }}</span>
+            {% endif %}
+          </div>
+
+          <div class="d-flex flex-wrap align-items-start gap-4 mb-3">
+            {% if reg.days_until is not none and 0 <= reg.days_until <= 1 %}
+            <div class="qr-box-lms">
+              <img loading="lazy" src="/ticket/qr/{{ reg.id }}" alt="QR Code" data-h-error="participant/dashboard:8">
+              <div class="qr-box-lms__id">{{ reg.get('reg_id', reg.id)[:20] }}</div>
+            </div>
+            {% else %}
+            <div class="qr-box-lms qr-box-lms--locked">
+              <i class="fas fa-lock" aria-hidden="true"></i>
+              <div class="qr-box-lms__id">QR unlocks<br>1 day before</div>
+            </div>
+            {% endif %}
+
+            {#- The place only, once results are out; never a score (UPG-336) #}
+            {% if reg.final_rank %}
+            <div class="score-box-lms" data-place>
+              <div class="score-box-lms__label">Your place</div>
+              <div class="score-box-lms__rank">
+                <i class="fas fa-medal" aria-hidden="true"></i>
+                {% if reg.final_rank == 1 %}1st
+                {% elif reg.final_rank == 2 %}2nd
+                {% elif reg.final_rank == 3 %}3rd
+                {% else %}#{{ reg.final_rank }}{% endif %}
+              </div>
+            </div>
+            {% endif %}
+          </div>
+
+          {% if reg.get('members') and reg.members|length > 1 %}
+          <div class="mb-3">
+            <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#members-{{ reg.id }}" aria-expanded="false" aria-controls="members-{{ reg.id }}">
+              <i class="fas fa-users me-1"></i> Team Members ({{ reg.members|length }})
+            </button>
+            <div class="collapse mt-2" id="members-{{ reg.id }}">
+              <div class="members-box">
+                {% for m in reg.members %}
+                <div class="d-flex justify-content-between align-items-center py-1 border-bottom small">
+                  <span>{{ m.name }}{% if (m.email or '')|lower == (user_email or '')|lower %} <span class="text-muted">(you)</span>{% endif %}</span>
+                  <span class="se-badge se-badge--plain {{ 'se-badge--gold' if m.role in ('Team Leader', 'Lead') else 'se-badge--neutral' }}">{{ m.role or 'Member' }}</span>
+                </div>
+                {% endfor %}
+              </div>
+            </div>
+          </div>
+          {% endif %}
+
+          {#- UPG-366: one main button (and the hackathon page or certificate when there is one); the rest under "More", Cancel last and apart -#}
+          <div class="d-flex flex-wrap gap-2 pt-2 border-top" data-ticket-actions>
+            {% if reg.hackathon_page %}
+            <a href="/hackathon/{{ reg.event_id }}" class="btn btn-gold btn-sm" data-hackathon-page><i class="fas fa-code" aria-hidden="true"></i> Hackathon page</a>
+            {% endif %}
+            <a href="/ticket/{{ reg.id }}" class="btn btn-primary btn-sm"><i class="fas fa-qrcode" aria-hidden="true"></i> View ticket</a>
+            {% if reg.cert_eligible %}
+            <a href="/participant/certificate/{{ reg.id }}" class="btn btn-gold btn-sm"><i class="fas fa-certificate" aria-hidden="true"></i> Certificate</a>
+            {% endif %}
+            <details class="ticket-more" data-ticket-more>
+              <summary class="btn btn-outline-secondary btn-sm"><i class="fas fa-ellipsis-h" aria-hidden="true"></i> More</summary>
+              <div class="ticket-more__list">
+                {% if reg.may_edit %}
+                <a href="/participant/registration/{{ reg.id }}/edit" class="btn btn-outline-primary btn-sm" data-edit-details><i class="fas fa-pen" aria-hidden="true"></i> Edit details</a>
+                {% endif %}
+                {% if reg.team_code %}
+                <a href="/teams/{{ reg.id }}" class="btn btn-outline-secondary btn-sm" data-team-page><i class="fas fa-users" aria-hidden="true"></i> Team page</a>
+                {% endif %}
+                <a href="/participant/badge/{{ reg.id }}" class="btn btn-outline-secondary btn-sm"><i class="fas fa-id-badge" aria-hidden="true"></i> Badge</a>
+                <a href="/event/{{ reg.event_id }}" class="btn btn-outline-secondary btn-sm"><i class="fas fa-info-circle" aria-hidden="true"></i> Event info</a>
+                {% if reg.leaderboard_public %}
+                <a href="/participant/leaderboard/{{ reg.event_id }}" class="btn btn-outline-secondary btn-sm" data-leaderboard-link><i class="fas fa-trophy" aria-hidden="true"></i> Leaderboard</a>
+                {% endif %}
+                {% if reg.is_lead and reg.get('status') != 'Cancelled' and reg.get('attendance') != 'Present' %}
+                <form method="POST" action="/participant/cancel/{{ reg.id }}" class="ticket-more__cancel" data-ticket-cancel>
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit" class="btn btn-sm btn-outline-danger" data-confirm="Cancel registration for {{ reg.event_title|e }}?">
+                    <i class="fas fa-times-circle" aria-hidden="true"></i> Cancel registration
+                  </button>
+                </form>
+                {% endif %}
+              </div>
+            </details>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+      {% else %}
+      <div class="empty-state">
+        <i class="fas fa-ticket-alt" aria-hidden="true"></i>
+        <h3>No active registrations</h3>
+        <p>You haven't registered for any upcoming events yet.</p>
+        <a href="/events" class="btn btn-primary"><i class="fas fa-compass" aria-hidden="true"></i> Discover events</a>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- ── PAST EVENTS & CERTIFICATES ── -->
+    {% if completed_events %}
+    <div id="past">
+      <div class="portal-section-title">
+        <i class="fas fa-history" aria-hidden="true"></i>
+        <span>Past events</span>
+        <span class="portal-section-count">{{ completed_events|length }}</span>
+      </div>
+
+      <div class="row g-3">
+        {% for reg in completed_events %}
+        <div class="col-md-6 past-event-card" data-ticket="past" data-category="{{ reg.cat_key }}" data-cert="{{ 'true' if reg.cert_eligible else 'false' }}">
+          <div class="past-card">
+            <div>
+              <div class="past-card__title">{{ reg.event_title }}</div>
+              <div class="past-card__meta">
+                {{ reg.event_date|day }}
+                {% if reg.final_rank %}&nbsp;·&nbsp;Rank #{{ reg.final_rank }}{% endif %}
+                {% if reg.is_cancelled %}&nbsp;<span class="ticket-chip ticket-chip-cancelled">Cancelled</span>{% endif %}
+              </div>
+            </div>
+            <div class="d-flex gap-2">
+              {% if reg.hackathon_page %}
+              <a href="/hackathon/{{ reg.event_id }}" class="btn btn-sm btn-gold" data-hackathon-page title="Hackathon page" aria-label="Hackathon page for {{ reg.event_title }}"><i class="fas fa-code" aria-hidden="true"></i></a>
+              {% endif %}
+              {% if reg.cert_eligible %}
+              <a href="/participant/certificate/{{ reg.id }}" class="btn btn-sm btn-gold" title="Download certificate" aria-label="Download certificate for {{ reg.event_title }}"><i class="fas fa-certificate" aria-hidden="true"></i></a>
+              {% endif %}
+              <a href="/ticket/{{ reg.id }}" class="btn btn-sm btn-outline-secondary" title="View ticket" aria-label="View ticket for {{ reg.event_title }}"><i class="fas fa-qrcode" aria-hidden="true"></i></a>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- ── DISCOVER UPCOMING EVENTS ── -->
+    {% if upcoming_events %}
+    <div id="discover" class="mt-4">
+      <div class="portal-section-title">
+        <i class="fas fa-compass" aria-hidden="true"></i>
+        <span>Explore upcoming events</span>
+        <span class="portal-section-count">{{ upcoming_events|length }}</span>
+      </div>
+
+      <div class="discover-grid-lms">
+        {% for evt in upcoming_events %}
+        <div class="discover-card-lms">
+          <div>
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <span class="se-badge se-badge--brand se-badge--plain">{{ evt.category or 'General' }}</span>
+              <span class="small text-subtle"><i class="far fa-calendar-alt me-1" aria-hidden="true"></i>{{ evt.date|day }}</span>
+            </div>
+            <h3 class="discover-card-lms__title">{{ evt.title }}</h3>
+            <div class="small text-subtle mb-3"><i class="fas fa-map-marker-alt me-1" aria-hidden="true"></i>{{ venue_label(evt) }}</div>
+          </div>
+          <div class="d-flex justify-content-between align-items-center pt-2 border-top">
+            <span class="fw-bold text-strong">
+              {% if evt.get('entry_fee') and evt.entry_fee|int > 0 %}₹{{ evt.entry_fee }}{% else %}Free{% endif %}
+            </span>
+            {% set rs = evt.reg_state or reg_state_of(evt) %}{#- UPG-266 -#}
+            {% if rs.action %}<a href="{{ rs.action_url }}" class="btn btn-sm btn-primary" data-reg-action="{{ rs.action }}"><i class="fas {{ 'fa-user-clock' if rs.action == 'waitlist' else 'fa-plus' }}" aria-hidden="true"></i> {{ rs.action_label }}</a>
+            {% else %}<a href="/event/{{ evt.id }}" class="btn btn-sm btn-outline-secondary" data-reg-action="details" title="{{ rs.explanation }}">{{ rs.label }}</a>{% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+
+<div class="portal-section-title" id="profile-section">
+  <i class="fas fa-id-badge" aria-hidden="true"></i>
+  <span>Your profile and activity</span>
+</div>
+{% set nm = (user_name or '').split('(')[0].strip() %}
+{% call ui.profile_hero(user_name or 'Student', user_email, current_avatar, lazy=True, short=True) %}
+    <div class="portal-hero-meta-row">
+      <span class="portal-hero-meta-item">Register number: <strong>{{ up.get('usn') or '—' }}</strong></span>
+      <span class="portal-hero-meta-item">Degree: <strong>{{ up.get('degree') or (up.get('department') and 'B.E - ' ~ up.get('department')) or '—' }}</strong></span>
+      <span class="portal-hero-meta-item">Batch: <strong>{{ up.get('batch') or '—' }}</strong></span>
+      <span class="portal-hero-meta-item">College: <strong>{{ up.get('college') or 'Sapthagiri NPS University' }}</strong></span>
+    </div>
+{% endcall %}
+
+<section class="portal-widgets-grid" aria-label="Your activity">
+  <div class="panel portal-widget-card">
+    <div class="portal-widget-header"><span>Activity score</span><span class="se-badge se-badge--brand se-badge--plain">Points</span></div>
+    <div class="score-metric-label">Total points</div>
+    <div class="score-metric-value">{{ user_xp or 0 }}</div>
+    <div class="mt-2 small text-subtle"><i class="fas fa-medal me-1 text-gold" aria-hidden="true"></i> Level {{ ((user_xp or 0) // 100) + 1 }} · activity tier</div>
+  </div>
+  {#- Without tickets the "My active tickets" section above already says so (UPG-297 (c)) -#}
+  {% if active_tickets %}
+  <div class="panel portal-widget-card" data-widget="my-registrations">
+    <div class="portal-widget-header"><span>My registrations</span><span class="se-badge se-badge--neutral se-badge--plain">{{ active_tickets|length }} active</span></div>
+    <div class="d-flex flex-column gap-2">
+      {% for t in active_tickets[:2] %}
+      <div class="mini-reg"><span>{{ t.event_title }}</span><span class="ticket-chip ticket-chip-upcoming">Registered</span></div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  <div class="panel portal-widget-card">
+    <div class="portal-widget-header"><span>Event attendance</span><span class="se-badge se-badge--success se-badge--plain">Verified</span></div>
+    <div class="attendance-metric-layout">
+      {% set turn_pct = ((attended_count / (total_regs_count or 1)) * 100)|int if total_regs_count else 0 %}
+      <div class="donut-chart-box" role="img" aria-label="Attended {{ attended_count or 0 }} of {{ total_regs_count or 0 }} events">
+        <svg viewBox="0 0 44 44" aria-hidden="true">
+          <circle cx="22" cy="22" r="18" fill="none" stroke="var(--surface-muted)" stroke-width="3.5" />
+          <circle cx="22" cy="22" r="18" fill="none" stroke="var(--brand-navy)" stroke-width="3.5" stroke-linecap="round"
+                  stroke-dasharray="113" stroke-dashoffset="{{ 113 - (turn_pct * 113 // 100) }}" />
+        </svg>
+        <div class="donut-chart-center">
+          <div class="donut-chart-center-num">{{ attended_count or 0 }}/{{ total_regs_count or 0 }}</div>
+          <div class="donut-chart-center-sub">events</div>
+        </div>
+      </div>
+      <div class="category-bars-list">
+        {% for key, label, color in [('technical', 'Technical', '#3b5bc9'), ('cultural', 'Cultural', '#b7791f'), ('sports', 'Sports', '#0f8fb0')] %}
+        <div>
+          <div class="category-bar-header"><span>{{ label }}</span><span>{{ cc.get(key, 0) }}</span></div>
+          <div class="progress" style="height:6px;" role="progressbar" aria-label="{{ label }} events" aria-valuenow="{{ cc.get(key, 0) }}" aria-valuemin="0">
+            <div class="progress-bar" style="width: {{ [(cc.get(key, 0) * 25), 100]|min }}%; background: {{ color }};"></div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</section>
+
+{% if config.get('REFERRALS_ENABLED') %}{# hidden until payouts exist (UPG-105) #}
+<section class="panel mb-4" aria-label="Referrals">
+  <div class="row align-items-center g-3">
+    <div class="col-md-7">
+      <h2 class="h6 mb-1"><i class="fas fa-gift me-2 text-gold" aria-hidden="true"></i>Refer students, earn rewards</h2>
+      <p class="text-muted small mb-3">Share your link. You get ₹50 when friends register and attend fests.</p>
+      <div class="input-group" style="max-width:460px;">
+        <input aria-label="Your referral link" type="text" id="ref-link-val" class="form-control form-control-sm font-monospace" readonly value="Loading link…">
+        <button type="button" class="btn btn-sm btn-primary" data-h-click="participant/dashboard:6"><i class="fas fa-copy" aria-hidden="true"></i> Copy</button>
+      </div>
+    </div>
+    <div class="col-md-5 text-md-end text-center">
+      <div class="ref-stats">
+        <div><span class="lbl">Referrals</span><div class="val" id="ref-count-val">—</div></div>
+        <div class="sep" aria-hidden="true"></div>
+        <div><span class="lbl">Earned</span><div class="val" id="ref-earned-val">—</div></div>
+        <div class="sep" aria-hidden="true"></div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-h-click="participant/dashboard:7">Withdraw</button>
+      </div>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+{% endblock %}
+{% block extra_js %}
+{% include "layouts/_bootstrap_js.html" %}
+<script nonce="{{ csp_nonce() }}">
+/* The student's events in the shared command palette (static/js/command-palette.js) */
+window.SE_PALETTE_EXTRA = {{ active_tickets | map(attribute='event_title') | list | tojson }}.map(function (title, i) {
+  return { name: title, url: '/event/' + {{ active_tickets | map(attribute='event_id') | list | tojson }}[i] };
+});
+
+{% if config.get('REFERRALS_ENABLED') %}
+/* Referral (UPG-105: only when REFERRALS_ENABLED) */
+fetch('/participant/referrals/api/stats', { credentials: 'same-origin' })
+  .then(function(res) { return res.json(); })
+  .then(function(data) {
+    if (data.success) {
+      var linkInput = document.getElementById('ref-link-val');
+      if (linkInput) linkInput.value = data.referral_link;
+      var c = document.getElementById('ref-count-val');
+      if (c) c.innerText = data.count;
+      var e = document.getElementById('ref-earned-val');
+      if (e) e.innerText = '₹' + data.earned;
+    }
+  }).catch(function() {});
+
+function copyRefLink() {
+  var input = document.getElementById('ref-link-val');
+  if (input) {
+    navigator.clipboard.writeText(input.value).then(function() {
+      if (window.showToast) showToast('Referral link copied!', 'success', 2000);
+      else alert('Referral link copied!');
+    });
+  }
+}
+
+function claimPayout() {
+  fetch('/participant/referrals/api/claim', {
+    method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': document.querySelector('meta[name="csrf-token"]') ? document.querySelector('meta[name="csrf-token"]').content : '' }
+  }).then(function(res) { return res.json(); })
+    .then(function(data) { if (data.success && window.showToast) showToast(data.message, 'success', 3000); });
+}
+{% endif %}
+
+function openCmdPalette() { if (window.openCommandPalette) window.openCommandPalette(); }
+function togglePushSubscription() { /* push stub, as before */ }
+
+/* Tabs (UPG-104): All, Upcoming, Past, one per category the student has, Certificates */
+document.querySelectorAll('.portal-filter-pills .seg__btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('.portal-filter-pills .seg__btn').forEach(function(b) { b.classList.remove('active'); b.setAttribute('aria-pressed', 'false'); });
+    this.classList.add('active');
+    this.setAttribute('aria-pressed', 'true');
+    var filter = this.getAttribute('data-filter') || 'all';
+    var ticketsSection = document.getElementById('tickets-section');
+    var pastSection = document.getElementById('past');
+    var shown = 0;
+    function show(card, yes) { card.style.display = yes ? '' : 'none'; if (yes) shown++; }
+    document.querySelectorAll('.ticket-card-lms').forEach(function(t) {
+      var cat = t.getAttribute('data-category');
+      show(t, filter === 'all' || filter === 'active' || filter === cat);
+    });
+    document.querySelectorAll('.past-event-card').forEach(function(p) {
+      var cat = p.getAttribute('data-category');
+      show(p, filter === 'all' || filter === 'past' || filter === cat ||
+              (filter === 'certificates' && p.getAttribute('data-cert') === 'true'));
+    });
+    function anyVisible(section, sel) {
+      return section && Array.prototype.some.call(section.querySelectorAll(sel), function(c) { return c.style.display !== 'none'; });
+    }
+    if (ticketsSection) ticketsSection.style.display = (filter === 'all' || anyVisible(ticketsSection, '.ticket-card-lms')) ? '' : 'none';
+    if (pastSection) pastSection.style.display = anyVisible(pastSection, '.past-event-card') ? '' : 'none';
+    var empty = document.getElementById('tab-empty');
+    if (empty) empty.hidden = !(shown === 0 && filter !== 'all');
+  });
+});
+</script>
+{% endblock %}
+{% block handler_scripts %}{{ super() }}<script src="/static/js/handlers/participant__dashboard.js"></script>{% endblock %}

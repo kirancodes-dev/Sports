@@ -1,0 +1,27 @@
+{% extends "layouts/status.html" %}
+{% set status_icon = 'fa-location-dot' %}
+{% block title %}Self check-in — {{ event.title }}{% endblock %}
+{% block status %}
+  <h1>Venue check-in</h1>
+  <p class="mb-1"><strong>{{ event.title }}</strong></p>
+  <p class="small text-subtle">
+    <i class="fas fa-calendar-alt me-1" aria-hidden="true"></i>{{ event.get('date','TBD') }}
+    &nbsp;·&nbsp;
+    <i class="fas fa-map-marker-alt me-1" aria-hidden="true"></i>{{ venue_label(event) }}
+  </p>
+
+  <form method="POST" action="/checkin/{{ event.id }}/submit" class="mt-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="code" value="{{ code }}">
+    <div class="mb-3">
+      <label class="form-label" for="ci-email">Your registered email</label>
+      <input type="email" id="ci-email" name="email" value="{{ pre_email }}" class="form-control"
+             placeholder="you@example.com" required autofocus autocomplete="email">
+    </div>
+    <button type="submit" class="btn btn-gold btn-lg w-100">
+      <i class="fas fa-check-circle" aria-hidden="true"></i> Mark me present
+    </button>
+  </form>
+
+  <div class="status-actions"><a href="/" class="btn btn-link btn-sm"><i class="fas fa-arrow-left" aria-hidden="true"></i> Back to the portal</a></div>
+{% endblock %}

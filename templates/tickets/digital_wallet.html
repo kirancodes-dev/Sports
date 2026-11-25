@@ -1,0 +1,275 @@
+{% extends "layouts/standalone.html" %}
+{#- On the shared document since UPG-23a. -#}
+{% set site_footer_fixed = true %}
+{% block head %}
+    <title>{{ ticket.ticket_type or 'General' }} pass — {{ event.title or 'Event pass' }}</title>
+    {% include "layouts/_fontawesome.html" %}
+    <link href="/static/css/global.css" rel="stylesheet">
+    <style>
+        /* Digital wallet pass (UPG-63): navy pass, gold tier; an event theme still overrides */
+        :root {
+            --primary: {{ theme.primary or '#c69d67' }};
+            --card-bg: {{ theme.bg or '#00185e' }};
+            --text: {{ theme.text or '#ffffff' }};
+        }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+        body {
+            font-family: var(--font-body);
+            background: #040b33;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1.25rem 1.25rem 3.5rem;  /* room for the fixed site footer */
+            color: #f8fafc;
+        }
+        .wallet-container {
+            width: 100%;
+            max-width: 420px;
+            perspective: 1000px;
+        }
+        .ticket-card {
+            background: var(--card-bg);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-top: 4px solid var(--primary);
+            border-radius: 24px;
+            overflow: hidden;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+            position: relative;
+        }
+        .card-header {
+            padding: 1.75rem 1.75rem 1.25rem;
+            background: linear-gradient(180deg, rgba(255,255,255,0.06) 0%, transparent 100%);
+            border-bottom: 1px dashed rgba(255, 255, 255, 0.15);
+            position: relative;
+        }
+        .badge-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        .tier-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.35rem 0.85rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            background: var(--primary);
+            color: #00185e;
+        }
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.375rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            background: {% if ticket.status == 'checked_in' %}rgba(16, 185, 129, 0.2){% else %}rgba(59, 130, 246, 0.2){% endif %};
+            color: {% if ticket.status == 'checked_in' %}#4ade80{% else %}#dcc199{% endif %};
+            border: 1px solid currentColor;
+        }
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+        .event-title {
+            font-size: 1.35rem;
+            font-weight: 800;
+            line-height: 1.25;
+            color: #ffffff;
+            margin-bottom: 0.5rem;
+            letter-spacing: -0.02em;
+        }
+        .event-meta {
+            font-size: 0.875rem;
+            color: #c9d3ff;
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+        .card-body {
+            padding: 1.75rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            position: relative;
+        }
+        .qr-wrapper {
+            background: #ffffff;
+            padding: 1rem;
+            border-radius: 20px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+            margin-bottom: 1.5rem;
+            position: relative;
+        }
+        .qr-wrapper img {
+            display: block;
+            width: 200px;
+            height: 200px;
+            image-rendering: pixelated;
+        }
+        .ticket-code {
+            font-family: ui-monospace, Menlo, monospace;
+            font-size: 1rem;
+            font-weight: 700;
+            letter-spacing: 0.15em;
+            color: #e2e8f0;
+            margin-bottom: 1.5rem;
+            padding: 0.4rem 1rem;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .grid-info {
+            width: 100%;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+            text-align: left;
+        }
+        .info-cell {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 12px;
+            padding: 0.75rem 1rem;
+        }
+        .info-label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #b4bee0;
+            margin-bottom: 0.25rem;
+        }
+        .info-value {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: #f1f5f9;
+        }
+        .card-footer {
+            padding: 1.25rem 1.75rem 1.5rem;
+            background: rgba(0, 0, 0, 0.2);
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .btn-action {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            padding: 0.85rem;
+            border-radius: 14px;
+            font-weight: 700;
+            font-size: 0.9rem;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: none;
+        }
+        .btn-primary {
+            background: var(--primary);
+            color: #00185e;
+        }
+        .btn-action:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+        .wallet-brand { display: flex; justify-content: center; margin-bottom: 1rem; }
+        .wallet-brand .brand-logo { height: 32px; }
+        .btn-primary:hover {
+            opacity: 0.95;
+            transform: translateY(-1px);
+        }
+        .security-hash {
+            font-family: ui-monospace, Menlo, monospace;
+            font-size: 0.65rem;
+            color: #8f9bc4;
+            text-align: center;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            width: 100%;
+        }
+    </style>
+{% endblock %}
+{% block body %}
+{% include "includes/back_link.html" %}
+
+<main class="wallet-container" id="main-content">
+    <div class="wallet-brand"><img src="/static/img/snpsu-logo-reversed.png" alt="Sapthagiri NPS University" class="brand-logo" width="143" height="36"></div>
+    <div class="ticket-card">
+        <!-- Header -->
+        <div class="card-header">
+            <div class="badge-row">
+                <span class="tier-badge">{{ ticket.ticket_type or 'General' }} PASS</span>
+                <span class="status-pill">
+                    <span class="status-dot" aria-hidden="true"></span>
+                    {% if ticket.status == 'checked_in' %}Checked in{% else %}Ready for entry{% endif %}
+                </span>
+            </div>
+            <h1 class="event-title">{{ event.title or 'Event pass' }}</h1>
+            <div class="event-meta">
+                <span><i class="fas fa-calendar-alt me-1" aria-hidden="true"></i>{{ event.date or event.start_datetime or 'Date to be announced' }}</span>
+                <span><i class="fas fa-map-marker-alt me-1" aria-hidden="true"></i>{{ venue_label(event) }}</span>
+            </div>
+        </div>
+
+        <!-- Body & QR -->
+        <div class="card-body">
+            <div class="qr-wrapper">
+                <img loading="eager" src="data:image/png;base64,{{ qr_b64 }}" alt="Entry QR code for ticket {{ ticket.ticket_code }}" id="qr-image" width="200" height="200">
+            </div>
+
+            <div class="ticket-code">{{ ticket.ticket_code }}</div>
+
+            <div class="grid-info">
+                <div class="info-cell">
+                    <div class="info-label">Attendee</div>
+                    <div class="info-value">{{ ticket.lead_name or '—' }}</div>
+                </div>
+                <div class="info-cell">
+                    <div class="info-label">Gate</div>
+                    <div class="info-value">{{ ticket.gate_assignment or 'Not assigned' }}</div>
+                </div>
+                <div class="info-cell">
+                    <div class="info-label">Seat / Area</div>
+                    <div class="info-value">{{ ticket.seat_assignment or 'Not assigned' }}</div>
+                </div>
+                <div class="info-cell">
+                    <div class="info-label">Pass tier</div>
+                    <div class="info-value">{{ ticket.ticket_type or 'General' }}</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="card-footer">
+            <button type="button" class="btn-action btn-primary" data-h-click="tickets/digital_wallet:1">
+                <i class="fas fa-print" aria-hidden="true"></i><span>Save or print pass</span>
+            </button>
+            {% if ticket.qr_token_hash %}
+            <div class="security-hash" title="Ticket verification hash">
+                Verification hash: {{ ticket.qr_token_hash }}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</main>
+
+{% endblock %}
+{% block handler_scripts %}{{ super() }}<script src="/static/js/handlers/tickets__digital_wallet.js"></script>{% endblock %}

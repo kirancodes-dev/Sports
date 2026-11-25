@@ -1,0 +1,175 @@
+{% extends "base_classic.html" %}
+{#- University calendar (UPG-63): app layout; FullCalendar themed with brand tokens. -#}
+{% set app_active = 'calendar' %}
+{% block robots %}index, follow{% endblock %}
+{% block title %}University events calendar{% endblock %}
+{% block page_sub %}Official schedule of campus workshops, competitions, cultural fests and conferences.{% endblock %}
+{% block page_actions %}
+  <a href="{{ calendar_feed_url() }}" class="btn btn-outline-primary" title="Subscribe to your registered events in Apple, Google or Outlook calendar">
+    <i class="fas fa-rss" aria-hidden="true"></i> Personal .ics feed
+  </a>
+  <a href="/calendar" class="btn btn-secondary"><i class="fas fa-redo" aria-hidden="true"></i> Reset filters</a>
+{% endblock %}
+{% block extra_css %}
+{# FullCalendar 6 adds its own styles; the old CSS link pointed at a file that doesn't exist (UPG-60) #}
+<style>
+/* FullCalendar on brand tokens */
+.fc { --fc-border-color: var(--border); --fc-page-bg-color: var(--surface-card); --fc-neutral-bg-color: var(--surface-sunken); --fc-today-bg-color: var(--brand-gold-100); }
+.fc-toolbar-title { font-family: var(--font-heading); font-size: 1.1rem !important; font-weight: 800; color: var(--text-strong); }
+.fc .fc-button { background: var(--surface-card) !important; border: 1px solid var(--border-strong) !important; color: var(--text) !important; font-size: var(--fs-sm) !important; font-weight: 600; border-radius: var(--radius-sm) !important; box-shadow: none !important; text-transform: capitalize; }
+.fc .fc-button:hover { background: var(--hover-bg) !important; }
+.fc .fc-button-primary:not(:disabled).fc-button-active, .fc .fc-button-primary:not(:disabled):active { background: var(--brand-navy) !important; border-color: var(--brand-navy) !important; color: #fff !important; }
+.fc .fc-today-button { background: var(--brand-gold) !important; border-color: var(--brand-gold) !important; color: var(--brand-navy-900) !important; }
+.fc .fc-col-header-cell-cushion, .fc .fc-daygrid-day-number { color: var(--text-muted); text-decoration: none; font-size: var(--fs-sm); }
+.fc-event { border-radius: var(--radius-xs) !important; border: none !important; font-size: 0.72rem !important; font-weight: 600 !important; padding: 2px 6px !important; cursor: pointer; }
+.fc-daygrid-event-dot { display: none; }
+
+/* Event list beside the calendar */
+.ev-list-item { background: var(--surface-card); border-radius: var(--radius); border: 1px solid var(--border); padding: 14px 16px; margin-bottom: 10px; }
+.ev-cat-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.ev-list-title { font-size: var(--fs-base); font-weight: 700; color: var(--brand-ink); }
+.ev-list-meta { font-size: var(--fs-xs); color: var(--text-subtle); margin-top: 4px; }
+.ev-list-fee { font-size: var(--fs-xs); font-weight: 700; color: var(--brand-gold-700); }
+
+#cal-tooltip { position: fixed; background: var(--brand-navy-900); color: #fff; padding: 10px 14px; border-radius: var(--radius-sm); font-size: var(--fs-xs); max-width: 260px; z-index: 9999; pointer-events: none; box-shadow: var(--shadow-md); display: none; line-height: 1.5; }
+@media (max-width: 768px) { .fc-toolbar { flex-direction: column; gap: 10px; } }
+</style>
+{% endblock %}
+{% block content %}
+  <!-- Filter Bar -->
+  <div class="panel mb-4">
+    <form method="GET" action="/calendar" id="calFilterForm">
+      <div class="row g-3 align-items-end">
+        <!-- Department / Club Filter -->
+        <div class="col-6 col-md-3">
+          <label class="form-label" for="filter-dept">Department / club</label>
+          <select name="dept" id="filter-dept" class="form-select">
+            <option value="">All Departments &amp; Clubs</option>
+            {% for u in org_units %}
+            <option value="{{ u.slug or u.id }}" {% if filters.get('dept') in (u.slug, u.id) %}selected{% endif %}>
+              {{ u.name }} ({{ u.type }})
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <!-- Event Type Filter -->
+        <div class="col-6 col-md-2">
+          <label class="form-label" for="filter-type">Event type</label>
+          <select name="event_type" id="filter-type" class="form-select">
+            <option value="">All Types</option>
+            <option value="Technical" {% if filters.get('event_type') == 'Technical' %}selected{% endif %}>Technical</option>
+            <option value="Cultural" {% if filters.get('event_type') == 'Cultural' %}selected{% endif %}>Cultural</option>
+            <option value="Sports" {% if filters.get('event_type') == 'Sports' %}selected{% endif %}>Sports</option>
+            <option value="Management" {% if filters.get('event_type') == 'Management' %}selected{% endif %}>Management</option>
+            <option value="Workshop" {% if filters.get('event_type') == 'Workshop' %}selected{% endif %}>Workshop</option>
+            <option value="Hackathon" {% if filters.get('event_type') == 'Hackathon' %}selected{% endif %}>Hackathon</option>
+          </select>
+        </div>
+
+        <!-- Mode Filter -->
+        <div class="col-6 col-md-2">
+          <label class="form-label" for="filter-mode">Mode</label>
+          <select name="mode" id="filter-mode" class="form-select">
+            <option value="">All Modes</option>
+            <option value="offline" {% if filters.get('mode') == 'offline' %}selected{% endif %}>Offline (Campus)</option>
+            <option value="online" {% if filters.get('mode') == 'online' %}selected{% endif %}>Online (Virtual)</option>
+          </select>
+        </div>
+
+        <!-- Fee Filter -->
+        <div class="col-6 col-md-2">
+          <label class="form-label" for="filter-fee">Fee</label>
+          <select name="fee" id="filter-fee" class="form-select">
+            <option value="">All Pricing</option>
+            <option value="free" {% if filters.get('fee') == 'free' %}selected{% endif %}>Free Events</option>
+            <option value="paid" {% if filters.get('fee') == 'paid' %}selected{% endif %}>Paid Events</option>
+          </select>
+        </div>
+
+        <!-- My Events Toggle & Submit -->
+        <div class="col-12 col-md-3 d-flex align-items-center justify-content-between gap-2">
+          <div class="form-check form-switch mb-0">
+            <input class="form-check-input" type="checkbox" name="my_events" value="1" id="filter-my-events"
+                   {% if filters.get('my_events') in ('1', 'true', 'yes') %}checked{% endif %}
+                   data-h-change="public/calendar:1">
+            <label class="form-check-label fw-semibold" for="filter-my-events">
+              <i class="fas fa-user-check me-1" aria-hidden="true"></i>My events only
+            </label>
+          </div>
+          <button type="submit" class="btn btn-primary">
+            <i class="fas fa-filter" aria-hidden="true"></i> Filter
+          </button>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <div class="row g-4">
+    <!-- Main Interactive Calendar -->
+    <div class="col-lg-8">
+      <div class="panel">
+        <div id="calendar"></div>
+      </div>
+    </div>
+
+    <!-- Sidebar: Event List & Calendar Sync Links -->
+    <div class="col-lg-4">
+      <div class="d-flex align-items-center justify-content-between mb-3">
+        <h2 class="h6 m-0"><i class="fas fa-list me-2 text-gold" aria-hidden="true"></i>Filtered events</h2>
+        <span class="se-badge se-badge--neutral se-badge--plain">{{ events|length }} events</span>
+      </div>
+
+      {% if events %}
+        {% for ev in events | sort(attribute='date') %}
+        <div class="ev-list-item">
+          <div class="d-flex align-items-start gap-2">
+            <div class="ev-cat-dot mt-1"
+              style="background:{{ {'Technical':'var(--cat-technical)','Cultural':'var(--cat-cultural)','Sports':'var(--cat-sports)','Management':'var(--cat-management)'}.get(ev.get('category',''),'var(--brand-navy)') }};"></div>
+            <div style="flex:1;min-width:0;">
+              <a href="/forms/register/{{ ev.id }}" class="ev-list-title text-decoration-none d-block">
+                {{ ev.get('title','Event') }}
+              </a>
+              <div class="ev-list-meta">
+                <i class="fas fa-calendar-alt me-1" aria-hidden="true"></i>{{ ev.get('date','TBD') }}
+                &nbsp;·&nbsp;
+                <i class="fas fa-map-marker-alt me-1"></i>{{ venue_label(ev) }}
+              </div>
+              <div class="d-flex align-items-center justify-content-between mt-2 flex-wrap gap-1">
+                <div>
+                  <span class="se-badge se-badge--neutral se-badge--plain me-1">{{ ev.get('category','General') }}</span>
+                  <span class="ev-list-fee">{{ '₹' ~ ev.fee if ev.get('fee') and ev.fee|float > 0 else 'Free' }}</span>
+                </div>
+                <div class="d-flex gap-1">
+                  {% if ev.get('google_calendar_url') %}
+                  <a href="{{ ev.google_calendar_url }}" target="_blank" class="btn btn-sm btn-outline-primary" title="Add to Google Calendar" aria-label="Add to Google Calendar">
+                    <i class="fab fa-google"></i>
+                  </a>
+                  {% endif %}
+                  <a href="{{ ev.get('ics_url', '/events/' ~ ev.id ~ '/calendar.ics') }}" class="btn btn-sm btn-outline-secondary" title="Download .ics file">
+                    <i class="fas fa-download"></i> .ics
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="empty-state">
+          <i class="fas fa-calendar-times" aria-hidden="true"></i>
+          <p class="mb-0">No events match the selected filters.</p>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+<div id="cal-tooltip" role="tooltip"></div>
+{% endblock %}
+{% block extra_js %}
+{% include "layouts/_bootstrap_js.html" %}
+<script integrity="sha384-5JIwZN3kuxX2zKsavvNmbZ3zhZZMUtu/eQiK3BbXukpSXp0Cd2ZP4OAYKx7mrPgI" crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.js"></script>
+<script id="cal-events-data" type="application/json">{{ calendar_events | tojson }}</script>
+<script src="/static/js/pages/public__calendar.js"></script>
+{% endblock %}
+{% block handler_scripts %}{{ super() }}<script src="/static/js/handlers/public__calendar.js"></script>{% endblock %}

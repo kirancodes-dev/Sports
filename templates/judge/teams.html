@@ -1,0 +1,457 @@
+{% extends "base_classic.html" %}
+{#- On the app layout and portal design system (UPG-63). -#}
+{% set app_active = 'dashboard' %}
+{% block csrf_meta %}<meta name="csrf-token" content="{{ csrf_token() }}">{% endblock %}
+{% block title %}Score teams — {{ event.title }}{% endblock %}
+{% block page_title %}Score teams{% endblock %}
+{% block page_sub %}{{ event.title }} · Round {{ event.active_round or 1 }}{% if open_hall %} <span class="se-badge se-badge--gold ms-1"><i class="fas fa-door-open" aria-hidden="true"></i> Open hall mode</span>{% endif %}{% endblock %}
+{% block page_actions %}<a href="/judge/dashboard" class="btn btn-secondary"><i class="fas fa-arrow-left" aria-hidden="true"></i> Judge panel</a>{% endblock %}
+{% block extra_css %}
+<style>
+h1,h2,h3,h4,h5,h6{font-family: var(--font-heading);}
+.content{}
+.team-card{background:#fff;border-radius:12px;border:1px solid #e2e8f0;padding:16px 18px;transition:border-color .15s;}
+.team-card:hover{border-color:var(--brand-gold);}
+.team-card.scored{border-left:4px solid #22c55e;}
+.team-card.unscored{border-left:4px solid #e2e8f0;}
+.team-name{font-family: var(--font-heading);font-size:14.5px;font-weight:700;color: var(--brand-ink);}
+.lead-name{font-size:12.5px;color:#64748b;}
+.room-tag{font-size:11.5px;color:var(--text-muted);}
+.score-badge{background:var(--brand-gold);color:var(--brand-navy);font-family: var(--font-heading);font-size:16px;font-weight:800;padding:6px 14px;border-radius:9px;}
+.score-badge.done{background:var(--success-soft);color:var(--success-text);}
+.btn-score-sm{background:var(--brand-gold);color:var(--brand-navy);border:none;font-size:12.5px;font-weight:600;padding:7px 18px;border-radius:8px;cursor:pointer;transition:.15s;}
+.btn-score-sm:hover{background:var(--brand-gold-700);}
+.btn-edit-sm{background:transparent;color: var(--brand-ink);border:1.5px solid var(--brand-navy);font-size:12px;font-weight:600;padding:6px 14px;border-radius:8px;cursor:pointer;transition:.15s;}
+.btn-edit-sm:hover{background:var(--brand-navy);color:#fff;}
+.criteria-slider{-webkit-appearance:none;height:5px;border-radius:3px;background:#e2e8f0;outline:none;width:100%;}
+.criteria-slider::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;background:var(--brand-gold);cursor:pointer;}
+.score-input{width:70px;border:1.5px solid #e2e8f0;border-radius:8px;padding:6px 10px;font-size:14px;font-weight:600;color: var(--brand-ink);text-align:center;}
+.score-input:focus{border-color:var(--brand-gold);outline:none;}
+.leaderboard-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f1f5f9;}
+.rank-badge{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0;}
+.rank-1{background:#fef9c3;color:#854d0e;}
+.rank-2{background:#e2e8f0;color:#334155;}
+.rank-3{background:#fef2f2;color:#991b1b;}
+.rank-other{background:#f1f5f9;color:#64748b;}
+</style>
+{% endblock %}
+{% block content %}
+<div class="content">
+  
+
+  <div class="row g-4">
+    <!-- Left: teams list -->
+    <div class="col-12 col-xl-8">
+      <div class="d-flex align-items-center justify-content-between mb-3">
+        <div>
+          <h2 class="h5 m-0">Teams</h2>
+          {% if submission_round and not submission_round.open %}<div class="small text-muted" data-judge-submission-round>Score each team's submission. Open it with "View submission".</div>{% endif %}
+        </div>
+        <span class="se-badge se-badge--neutral">
+          {{ teams|selectattr('my_score')|list|length }} / {{ teams|length }} scored
+        </span>
+      </div>
+
+      {% if teams %}
+      {#- Find a team by its name, code or lead (UPG-309) -#}
+      <input type="search" id="teamSearch" class="form-control mb-3" placeholder="Find a team by name or team code" aria-label="Find a team by name or team code" autocomplete="off" data-team-search>
+      <p class="text-muted small d-none" id="teamSearchNone" data-team-search-none>No team matches.</p>
+      <div class="d-flex flex-column gap-3" id="teamsList">
+        {% for team in teams %}
+        <div class="team-card {{ 'scored' if team.my_score else 'unscored' }}" id="card-{{ team.id }}" data-team-find="{{ ((team.team_name or '') ~ ' ' ~ (team.team_code or '') ~ ' ' ~ (team.lead_name or '')) | lower }}">
+          <div class="d-flex align-items-start justify-content-between gap-3">
+            <div class="flex-grow-1">
+              <div class="team-name">{{ team.team_name }}</div>{% if team.team_code %}<div class="small text-muted">Team code <code data-team-code>{{ team.team_code }}</code></div>{% endif %}
+              <div class="lead-name">{{ team.lead_name }}</div>
+              <div class="room-tag mt-1">
+                <i class="fas fa-door-open me-1"></i>{{ team.assigned_room or 'No room' }}
+                &nbsp;·&nbsp; Round {{ team.current_round or 1 }}
+                {% if team.members|length > 1 %}
+                &nbsp;·&nbsp; {{ team.members|length }} members
+                {% endif %}
+              </div>
+              {% if is_hackathon %}<a class="small" href="/hackathon/{{ event.id }}/review/{{ team.id }}" target="_blank" rel="noopener"><i class="fas fa-folder-open me-1" aria-hidden="true"></i>View submission</a>{% endif %}
+              {% if team.my_score and team.my_score.remarks %}
+              <div style="font-size:11.5px;color:var(--text-muted);margin-top:4px;font-style:italic;">
+                "{{ team.my_score.remarks }}"
+              </div>
+              {% endif %}
+            </div>
+            <div class="d-flex flex-column align-items-end gap-2">
+              {% if team.my_score %}
+              <div class="score-badge done">{{ team.my_score.raw_total if team.my_score.raw_total is not none else team.my_score.total }}</div>
+              <button class="btn-edit-sm" data-h-click="judge/teams:1" data-h-a0="{{ team.id }}">
+                Edit
+              </button>
+              {% else %}
+              <button class="btn-score-sm" data-h-click="judge/teams:2" data-h-a1="{{ team.id }}">
+                <i class="fas fa-star me-1"></i> Score
+              </button>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      {% else %}
+      <div style="text-align:center;padding:48px 24px;background:#fff;border-radius:14px;border:1px solid #e2e8f0;" data-judge-teams-empty>
+        <i class="fas fa-users fa-3x" style="color:#cbd5e1;display:block;margin-bottom:12px;"></i>
+        {% if submission_round and submission_round.open %}
+        <h5 class="fw-bold text-secondary mb-2">Submissions are still open</h5>
+        <p class="text-muted mb-0" style="font-size:14px;">
+          You score this round's submissions. Every team that submitted appears here after the submission deadline.
+        </p>
+        {% elif submission_round %}
+        <h5 class="fw-bold text-secondary mb-2">No submissions to score</h5>
+        <p class="text-muted mb-0" style="font-size:14px;">
+          No team still in this round submitted its work{% if not open_hall %}, or the teams that did are assigned to other judges{% endif %}.
+        </p>
+        {% else %}
+        <h5 class="fw-bold text-secondary mb-2">No Teams Assigned</h5>
+        <p class="text-muted mb-0" style="font-size:14px;">
+          Teams appear here once they check in and are assigned to you.
+        </p>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Right: live leaderboard -->
+    <div class="col-12 col-xl-4">
+      <div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:18px;position:sticky;top:72px;">
+        <div class="d-flex align-items-center justify-content-between mb-3">
+          <h6 style="font-family: var(--font-heading);font-weight:700;color: var(--brand-ink);margin:0;">
+            <i class="fas fa-trophy me-2" style="color:var(--brand-gold);"></i>Live Leaderboard
+          </h6>
+          <span id="lb-updated" style="font-size:10.5px;color:var(--text-muted);"></span>
+        </div>
+        <div id="leaderboard-container">
+          <p style="font-size:13px;color:var(--text-muted);text-align:center;padding:20px 0;">
+            Loading scores...
+          </p>
+        </div>
+        <button data-h-click="judge/teams:3" class="btn-edit-sm w-100 mt-2">
+          <i class="fas fa-sync-alt me-1"></i> Refresh
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SCORING MODAL -->
+<div class="modal fade" id="scoreModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="border-radius:16px;border:none;">
+      <div class="modal-header" style="background:var(--brand-navy);border-radius:16px 16px 0 0;">
+        <h5 class="modal-title text-white" id="scoreModalTitle">Score Team</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-4" id="scoreModalBody">
+        <!-- Dynamically filled by JS -->
+      </div>
+      <div class="modal-footer border-0 pb-4 px-4 pt-0">
+        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn text-white fw-bold px-4"
+                style="background:var(--brand-gold);border-radius:9px;"
+                id="submitScoreBtn" data-h-click="judge/teams:4">
+          <i class="fas fa-check me-1"></i> Save Score
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% include "layouts/_bootstrap_js.html" %}
+<script nonce="{{ csp_nonce() }}">
+const EVENT_ID    = "{{ event.id }}";
+const CRITERIA    = {{ (event.judging_criteria_normalized or event.judging_criteria or ['Overall Score']) | tojson | safe }};
+const TEAMS_DATA  = {{ teams | tojson | safe }};
+(function () {   // the team search (UPG-309)
+  const box = document.getElementById('teamSearch');
+  if (!box) return;
+  box.addEventListener('input', function () {
+    const q = box.value.trim().toLowerCase().replace(/\s+/g, ' ');
+    let shown = 0;
+    document.querySelectorAll('[data-team-find]').forEach(function (card) {
+      const hit = !q || card.dataset.teamFind.indexOf(q) !== -1;
+      card.style.display = hit ? '' : 'none';
+      if (hit) shown += 1;
+    });
+    document.getElementById('teamSearchNone').classList.toggle('d-none', shown > 0);
+  });
+})();
+let   currentRegId = null;
+const scoreModal    = new bootstrap.Modal(document.getElementById('scoreModal'));
+
+function openScoreModal(regId) {
+  const team = TEAMS_DATA.find(t => t.id === regId) || {};
+  currentRegId = regId;
+  document.getElementById('scoreModalTitle').textContent =
+    'Score: ' + (team.team_name || regId);
+
+  const existing = team.my_score || {};
+  const existing_scores = existing.details || {};
+
+  let html = '';
+  CRITERIA.forEach(c => {
+    const cName = typeof c === 'object' ? c.name : c;
+    const maxScore = typeof c === 'object' ? (c.max_score || 100) : 100;
+    const cSlug = cName.replace(/\s/g, '_');
+    const val = existing_scores[cName] !== undefined ? existing_scores[cName] : (existing_scores[c] || 0);
+    html += `
+      <div class="mb-3">
+        <div class="d-flex justify-content-between align-items-center mb-1">
+          <label style="font-size:12px;font-weight:700;color:var(--text-muted);
+                        text-transform:uppercase;letter-spacing:.6px;">${escapeHtml(cName)} (Max: ${escapeHtml(maxScore)})</label>
+          <input type="number" class="score-input" id="${escapeHtml('score-' + cSlug)}"
+                 min="0" max="${escapeHtml(maxScore)}" value="${escapeHtml(val)}"
+                 data-h-input="se:call" data-call="updateTotal">
+        </div>
+        <input type="range" class="criteria-slider" min="0" max="${escapeHtml(maxScore)}" value="${escapeHtml(val)}"
+               data-h-input="judge/teams:sync-slider" data-target="${escapeHtml('score-' + cSlug)}">
+      </div>`;
+  });
+
+  html += `
+    <div style="background:#f8fafc;border-radius:10px;padding:12px 14px;
+                display:flex;justify-content:space-between;align-items:center;margin-top:4px;">
+      <span style="font-size:13px;color:var(--text-muted);font-weight:600;">Average</span>
+      <span id="totalDisplay" style="font-family: var(--font-heading);font-size:22px;
+            font-weight:800;color:var(--brand-gold);">${escapeHtml(existing.raw_total ?? existing.total ?? 0)}</span>
+    </div>
+    <div class="mt-3">
+      <label style="font-size:12px;font-weight:700;color:var(--text-muted);
+                    text-transform:uppercase;letter-spacing:.6px;">Remarks (optional)</label>
+      <textarea class="form-control mt-1" id="remarksField" rows="2"
+                placeholder="Optional feedback for this team..."
+                style="border-radius:9px;font-size:13px;">${escapeHtml(existing.remarks || '')}</textarea>
+    </div>
+    <!-- Voice Dictation -->
+    <div class="mt-3 p-3" style="background:#f0fdf4; border:1px dashed #bbf7d0; border-radius:10px;">
+      <label style="font-size:12px;font-weight:700;color:#166534;
+                    text-transform:uppercase;letter-spacing:.6px;">
+        <i class="fas fa-microphone me-1"></i>Voice Dictation Scoring
+      </label>
+      <div style="display:flex; gap:8px; margin-top:6px;">
+        <button type="button" class="btn btn-success btn-sm px-3" style="font-size:12px; border-radius:20px;" id="micBtn" data-h-click="se:call" data-call="toggleDictation">
+          <i class="fas fa-microphone"></i> Dictate Score
+        </button>
+        <div id="dictationStatus" class="small text-success d-flex align-items-center" style="font-size:11px;">Ready</div>
+      </div>
+      <div style="font-size:10px;color:#166534;margin-top:4px;opacity:0.85;">
+        E.g.: "give Innovation score 85, Presentation 90, remarks project is excellent"
+      </div>
+    </div>`;
+
+  document.getElementById('scoreModalBody').innerHTML = html;
+  scoreModal.show();
+}
+
+function syncSlider(slider, inputId) {
+  document.getElementById(inputId).value = slider.value;
+  updateTotal();
+}
+
+function updateTotal() {
+  let total = 0;
+  CRITERIA.forEach(c => {
+    const cName = typeof c === 'object' ? c.name : c;
+    const el = document.getElementById('score-' + cName.replace(/\s/g,'_'));
+    if (el) {
+      const v = parseInt(el.value) || 0;
+      // Sync slider
+      const sliders = document.querySelectorAll('.criteria-slider');
+      sliders.forEach(s => {
+        const label = s.previousElementSibling?.querySelector('label');
+        if (label && label.textContent.includes(cName)) s.value = v;
+      });
+      total += v;
+    }
+  });
+  // The marks added up, out of the criteria's total (UPG-309)
+  const outOf = CRITERIA.reduce((n, c) => n + (typeof c === 'object' && c.max_score ? Number(c.max_score) : 100), 0);
+  const disp = document.getElementById('totalDisplay');
+  if (disp) disp.textContent = total + ' / ' + outOf;
+}
+
+async function submitScore() {
+  if (!currentRegId) return;
+  const btn = document.getElementById('submitScoreBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Saving...';
+
+  const scores = {};
+  CRITERIA.forEach(c => {
+    const cName = typeof c === 'object' ? c.name : c;
+    const el = document.getElementById('score-' + cName.replace(/\s/g,'_'));
+    scores[cName] = el ? parseInt(el.value) || 0 : 0;
+  });
+  const remarks = document.getElementById('remarksField')?.value || '';
+
+  try {
+    const res = await fetch(`/judge/score_inline/${currentRegId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scores, remarks })
+    });
+    const data = await res.json();
+    if (data.status === 'ok') {
+      scoreModal.hide();
+      // Update card UI without reload
+      const card = document.getElementById('card-' + currentRegId);
+      if (card) {
+        card.classList.remove('unscored');
+        card.classList.add('scored');
+        const badge = card.querySelector('.score-badge, .btn-score-sm');
+        if (badge) {
+          badge.outerHTML = `<div class="score-badge done">${escapeHtml(data.total ?? data.avg)}</div>`;
+        }
+      }
+      fetchLeaderboard();
+    } else {
+      alert('Error: ' + data.message);
+    }
+  } catch (e) {
+    alert('Network error. Please try again.');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-check me-1"></i> Save Score';
+  }
+}
+
+async function fetchLeaderboard() {
+  try {
+    const res  = await fetch(`/judge/leaderboard/${EVENT_ID}`);
+    const data = await res.json();
+    const el   = document.getElementById('leaderboard-container');
+    if (!data.data || data.data.length === 0) {
+      el.innerHTML = '<p style="font-size:13px;color:var(--text-muted);text-align:center;padding:16px 0;">No scores yet.</p>';
+      return;
+    }
+    let html = '';
+    data.data.slice(0, 10).forEach(row => {
+      const rankClass = row.rank <= 3 ? `rank-${row.rank}` : 'rank-other';
+      html += `
+        <div class="leaderboard-row">
+          <div class="rank-badge ${escapeHtml(rankClass)}" title="${row.tied ? 'Shared place' : ''}">${escapeHtml((row.tied ? '=' : '') + row.rank)}</div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:13px;font-weight:600;color:var(--text-strong);
+                        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+              ${escapeHtml(row.team_name)}
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);">${escapeHtml(row.judges)} judge${row.judges !== 1 ? 's' : ''}</div>
+          </div>
+          <div style="font-family: var(--font-heading);font-size:16px;font-weight:800;font-variant-numeric:tabular-nums;
+                      color:var(--brand-ink);">${escapeHtml(row.score_text)}</div>
+        </div>`;
+    });
+    el.innerHTML = html;
+    document.getElementById('lb-updated').textContent =
+      'Updated ' + new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+  } catch (e) {
+    console.error('Leaderboard fetch failed', e);
+  }
+}
+
+let recognition = null;
+let dictating = false;
+
+function toggleDictation() {
+  const btn = document.getElementById('micBtn');
+  const status = document.getElementById('dictationStatus');
+
+  if (dictating) {
+    if (recognition) recognition.stop();
+    return;
+  }
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    alert("Speech recognition is not supported in this browser. Please use Google Chrome or Safari.");
+    return;
+  }
+
+  recognition = new SpeechRecognition();
+  recognition.lang = 'en-US';
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+
+  recognition.onstart = () => {
+    dictating = true;
+    btn.innerHTML = '<i class="fas fa-stop"></i> Stop';
+    btn.className = 'btn btn-danger btn-sm px-3';
+    status.textContent = 'Listening...';
+  };
+
+  recognition.onresult = (event) => {
+    const transcript = event.results[0][0].transcript;
+    status.textContent = 'Parsing speech...';
+    
+    // Call backend parser
+    fetch('/judge/speech-to-score', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        transcript: transcript,
+        criteria: CRITERIA
+      })
+    })
+    .then(resp => resp.json())
+    .then(data => {
+      if (data.status === 'ok') {
+        const res = data.result;
+        CRITERIA.forEach(c => {
+          const key = 'score-' + c.replace(/\s/g,'_');
+          if (res.scores && res.scores[c] !== undefined) {
+            const el = document.getElementById(key);
+            if (el) el.value = res.scores[c];
+          }
+        });
+        if (res.remarks) {
+          const remEl = document.getElementById('remarksField');
+          if (remEl) remEl.value = res.remarks;
+        }
+        updateTotal();
+        status.textContent = 'Speech parsed successfully!';
+      } else {
+        status.textContent = 'Parsing failed.';
+      }
+    })
+    .catch(err => {
+      status.textContent = 'Error parsing speech.';
+    });
+  };
+
+  recognition.onerror = (e) => {
+    console.error(e);
+    status.textContent = 'Error: ' + e.error;
+    stopDictation();
+  };
+
+  recognition.onend = () => {
+    stopDictation();
+  };
+
+  recognition.start();
+}
+
+function stopDictation() {
+  dictating = false;
+  const btn = document.getElementById('micBtn');
+  if (btn) {
+    btn.innerHTML = '<i class="fas fa-microphone"></i> Dictate Score';
+    btn.className = 'btn btn-success btn-sm px-3';
+  }
+}
+
+// Auto-refresh leaderboard every 20 seconds
+fetchLeaderboard();
+setInterval(fetchLeaderboard, 20000);
+</script>
+<script src="/static/js/pages/judge__teams.js"></script>
+{% endblock %}
+{% block handler_scripts %}{{ super() }}<script src="/static/js/handlers/judge__teams.js"></script>
+{% endblock %}

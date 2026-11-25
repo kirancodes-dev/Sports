@@ -1,0 +1,199 @@
+{% extends "base_classic.html" %}
+{#- On the app layout and portal design system (UPG-63). -#}
+{% block title %}Send Email | Admin{% endblock %}
+{% block page_title %}Send email{% endblock %}
+{% block page_sub %}Email all users, one event's registrants, or everyone with a given role.{% endblock %}
+{% block extra_css %}
+<style>
+.mail-wrap { max-width: 780px; }
+h1,h2,h3,h4,h5 { font-family: var(--font-heading); }
+.card-header { background: var(--brand-navy); color: #fff; border-bottom: 3px solid var(--brand-gold); padding: 16px 22px; }
+.btn-send { background: var(--brand-navy); color: #fff; border: none; border-radius: 8px; padding: 12px 32px; font-weight: 700; font-size: 1rem; transition: background .2s; }
+.btn-send:hover { background: var(--brand-navy-900); color: #fff; }
+.audience-card { border: 1px solid var(--border-strong); border-radius: 10px; padding: 14px 18px; cursor: pointer; transition: border-color .2s, background .2s; }
+.audience-card:has(input:checked) { border-color: var(--brand-navy); background: var(--brand-navy-50); box-shadow: inset 0 0 0 1px var(--brand-navy); }
+.preview-box { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; font-size: .9rem; }
+.counter-badge { background: var(--brand-gold); color: var(--brand-navy); border-radius: 20px; padding: 2px 10px; font-size: .78rem; font-weight: 700; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="mx-auto mail-wrap">
+
+    <!-- Flash messages -->
+    
+
+    <!-- Success summary -->
+    {% if last_sent %}
+    <div class="alert alert-success rounded-3 mb-4 d-flex align-items-center gap-3">
+        <i class="fas fa-check-circle fa-2x"></i>
+        <div>
+            <strong>Sent!</strong> &quot;{{ last_sent.subject }}&quot; delivered to
+            <span class="counter-badge">{{ last_sent.count }}</span> recipient(s).
+        </div>
+    </div>
+    {% endif %}
+
+    {% if mail %}
+    {#- What's been sent against the plan's limits (UPG-255) -#}
+    <div class="card mb-4" data-mail-counts>
+        <div class="card-body py-3 d-flex flex-wrap gap-4 small">
+            <div><span class="text-muted d-block">Sent today</span>
+                <strong data-sent-today>{{ mail.today }}{% if mail.daily %} of {{ mail.daily }}{% endif %}</strong></div>
+            <div><span class="text-muted d-block">Sent this month</span>
+                <strong data-sent-month>{% if mail.monthly %}{{ mail.month }} of {{ mail.monthly }}{% else %}no monthly limit set{% endif %}</strong></div>
+            {% if mail.smtp %}<div><span class="text-muted d-block">Gmail SMTP fallback today</span>
+                <strong data-sent-smtp>{{ mail.smtp_today }}{% if mail.smtp_daily %} of {{ mail.smtp_daily }}{% endif %}</strong></div>{% endif %}
+            {% if mail.backup %}<div><span class="text-muted d-block">Backup account today</span>
+                <strong data-sent-backup>{{ mail.backup_today }}{% if mail.backup_daily %} of {{ mail.backup_daily }}{% endif %}</strong></div>{% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="card mb-4">
+        <div class="card-header d-flex align-items-center gap-2">
+            <i class="fas fa-envelope-open-text"></i>
+            <span class="fw-bold fs-5">Compose & Send Email</span>
+        </div>
+        <div class="card-body p-4">
+            <form method="POST" action="/admin/send_email" id="emailForm">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                <!-- ── Audience ──────────────────────────────── -->
+                <div class="mb-4">
+                    <label class="form-label mb-2">Send To</label>
+                    <div class="row g-2">
+
+                        <div class="col-12 col-md-4">
+                            <label class="audience-card d-flex align-items-start gap-2 h-100">
+                                <input type="radio" name="audience" value="all_users" checked class="mt-1">
+                                <div>
+                                    <div class="fw-bold" style="color: var(--brand-ink)">
+                                        <i class="fas fa-users me-1"></i> All Users
+                                    </div>
+                                    <small class="text-muted">Every registered account</small>
+                                </div>
+                            </label>
+                        </div>
+
+                        <div class="col-12 col-md-4">
+                            <label class="audience-card d-flex align-items-start gap-2 h-100">
+                                <input type="radio" name="audience" value="event_regs" class="mt-1" id="radioEvent">
+                                <div>
+                                    <div class="fw-bold" style="color: var(--brand-ink)">
+                                        <i class="fas fa-calendar-check me-1"></i> Event Registrants
+                                    </div>
+                                    <small class="text-muted">Everyone registered for one event</small>
+                                </div>
+                            </label>
+                        </div>
+
+                        <div class="col-12 col-md-4">
+                            <label class="audience-card d-flex align-items-start gap-2 h-100">
+                                <input type="radio" name="audience" value="role_filter" class="mt-1" id="radioRole">
+                                <div>
+                                    <div class="fw-bold" style="color: var(--brand-ink)">
+                                        <i class="fas fa-user-tag me-1"></i> By Role
+                                    </div>
+                                    <small class="text-muted">Students, Coordinators, Judges…</small>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Event selector (shown when event_regs selected) -->
+                <div class="mb-3" id="eventPicker" style="display:none;">
+                    <label class="form-label">Select Event</label>
+                    <select aria-label="Select Event" name="event_id" class="form-select">
+                        <option value="">— choose an event —</option>
+                        {% for ev in events %}
+                        <option value="{{ ev.id }}">{{ ev.get('title','(untitled)') }} — {{ ev.get('date','') }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- Role selector -->
+                <div class="mb-3" id="rolePicker" style="display:none;">
+                    <label class="form-label">Select Role</label>
+                    <select aria-label="Select Role" name="role_filter" class="form-select">
+                        <option value="Student">Students (Participants)</option>
+                        <option value="Coordinator">Coordinators</option>
+                        <option value="Judge">Judges</option>
+                        <option value="ClubSPOC">Club SPOCs</option>
+                        <option value="Admin">Admins</option>
+                    </select>
+                </div>
+
+                <!-- ── Subject ───────────────────────────────── -->
+                <div class="mb-3">
+                    <label class="form-label">Subject <span class="text-danger">*</span></label>
+                    <input aria-label="Subject" type="text" name="subject" class="form-control"
+                           placeholder="e.g. Important update about SapthaEvent 2026" required
+                           maxlength="120">
+                </div>
+
+                <!-- ── Message body ──────────────────────────── -->
+                <div class="mb-3">
+                    <label class="form-label">
+                        Message <span class="text-danger">*</span>
+                        <span class="text-muted fw-normal ms-2" style="font-size:.75rem;text-transform:none;">
+                            Supports line breaks. Will be wrapped in the SapthaEvent email template.
+                        </span>
+                    </label>
+                    <textarea aria-label="Message Supports line breaks. Will be wrapped in the SapthaEvent email template" name="message" class="form-control" rows="8" required
+                              placeholder="Dear participant,&#10;&#10;We are excited to announce..."
+                              id="msgBody"></textarea>
+                    <div class="d-flex justify-content-end mt-1">
+                        <small class="text-muted" id="charCount">0 characters</small>
+                    </div>
+                </div>
+
+                <!-- ── Live preview ──────────────────────────── -->
+                <div class="mb-4">
+                    <label class="form-label">Preview</label>
+                    <div class="preview-box">
+                        <div style="background:#00185e;color:#fff;padding:14px 18px;border-radius:8px 8px 0 0;margin:-20px -20px 16px;">
+                            <strong>SapthaEvent</strong> &middot; Sapthagiri NPS University
+                        </div>
+                        <div id="previewText" style="white-space:pre-wrap;color:#475569;">
+                            Your message will appear here…
+                        </div>
+                    </div>
+                </div>
+
+                <fieldset class="mb-3">
+                    <legend class="form-label">Send by</legend>
+                    <div class="d-flex flex-wrap gap-3">
+                        <div class="form-check"><input class="form-check-input" type="radio" name="channel" id="ch-email" value="email" checked><label class="form-check-label" for="ch-email">Email</label></div>
+                        <div class="form-check"><input class="form-check-input" type="radio" name="channel" id="ch-app" value="app"><label class="form-check-label" for="ch-app">In-app notification (the bell)</label></div>
+                        <div class="form-check"><input class="form-check-input" type="radio" name="channel" id="ch-both" value="both"><label class="form-check-label" for="ch-both">Both</label></div>
+                    </div>
+                </fieldset>
+
+                <div class="d-flex gap-3 align-items-center">
+                    <button type="submit" class="btn-send" id="sendBtn">
+                        <i class="fas fa-paper-plane me-2" aria-hidden="true"></i> Send
+                    </button>
+                    <small class="text-muted">Sends immediately to all selected recipients.</small>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Quick links -->
+    <div class="d-flex gap-3 flex-wrap">
+        <a href="/admin/dashboard" class="btn btn-outline-secondary btn-sm">
+            <i class="fas fa-tachometer-alt me-1"></i> Back to Dashboard
+        </a>
+        <a href="/diag/email?to={{ session.get('user_id','') }}" target="_blank"
+           class="btn btn-outline-success btn-sm">
+            <i class="fas fa-vial me-1"></i> Test Email (sends to you)
+        </a>
+    </div>
+</div>
+
+{% include "layouts/_bootstrap_js.html" %}
+<script src="/static/js/pages/admin__send_email.js"></script>
+{% endblock %}
+{% block handler_scripts %}{{ super() }}<script src="/static/js/handlers/admin__send_email.js"></script>
+{% endblock %}

@@ -1,0 +1,1826 @@
+"""
+routes_forms.py  —  Form Builder + Public Registration
+
+Flow:
+  SPOC creates event via wizard → form schema saved atomically to event_forms/<id>
+  Participant clicks Register on homepage → /forms/register/<id> renders that schema
+  Participant submits → /forms/submit/<id> validates, saves registration, sends notifications
+
+URL map:
+  GET  /forms/builder/<event_id>          — edit form after creation
+  POST /forms/save/<event_id>             — AJAX save from builder
+  GET  /forms/register/<event_id>         — PUBLIC registration page
+  POST /forms/submit/<event_id>           — PUBLIC form submission
+  GET  /forms/responses/<event_id>        — coordinator sees all submissions
+  GET  /forms/responses/export/<event_id> — CSV export
+  GET  /forms/schema/<event_id>           — JSON API (used by builder)
+"""
+import csv
+import datetime
+import io
+import json
+import logging
+import re
+
+logger = logging.getLogger(__name__)
+
+from flask import (Blueprint, Response, abort, current_app, flash, jsonify,
+                   redirect, render_template, request, session)
+try:
+    from google.cloud import firestore
+except ImportError:
+    firestore = None
+try:
+    from google.cloud.firestore_v1.base_query import FieldFilter
+except ImportError:
+    FieldFilter = None
+
+class DynamicDBProxy:
+    def __getattr__(self, name):
+        try:
+            import app as app_module
+            if hasattr(app_module, 'db') and app_module.db is not None:
+                return getattr(app_module.db, name)
+        except Exception:
+            pass
+        try:
+            from models import db as models_db
+            return getattr(models_db, name)
+        except Exception:
+            raise AttributeError(f"No DB available for attribute '{name}'")
+
+db = DynamicDBProxy()
+from utils import (login_required, role_required, log_action, safe_int, record_form_submission,
+                   create_registration, generate_reg_id, AlreadyRegistered)
+from utils_email import send_registration_confirmed_email
+from services_accounts import (REGISTRATION_EMAIL_NOT_SENT, cancel_url_for, create_unverified_account,
+                               email_login_link, load_cancel_token, resolve_registrant)
+
+from extensions import limiter
+from werkzeug.exceptions import HTTPException
+
+# WhatsApp goes through services_whatsapp: opted-in, once, under the cap (UPG-147)
+
+from typing import Optional
+
+forms_bp      = Blueprint('forms', __name__, url_prefix='/forms')
+BUILDER_ROLES = ['ClubSPOC', 'Coordinator', 'SuperAdmin', 'Super Admin']
+
+
+def _allowed(event_id, event: dict, permission: str) -> bool:
+    """The session's permission on this event (BLK-04): owners edit forms,
+    assigned staff see responses, export needs export_data."""
+    from services_permission import can
+    return can(session, permission, dict(event or {}, id=event_id), db=db)
+
+
+# =========================================================
+# HELPERS
+# =========================================================
+
+LAYOUT_TYPES = ('heading', 'paragraph', 'divider')
+
+CLOSED_STATUSES = ('draft', 'pending_approval', 'published', 'registration_closed',
+                   'completed', 'certified', 'cancelled', 'archived')
+
+
+def registration_closed(event: dict) -> bool:
+    """Not open yet, past its deadline, or over: the one check every
+    registration route applies (UPG-34). The rule itself, and the reason a
+    page shows, live in services_registration_state (UPG-266)."""
+    from services_registration_state import registerable
+    return not registerable(event or {})
+
+# The identity every registration needs, with the ids forms already use for it
+IDENTITY_FIELDS = (
+    (('full_name', 'name', 'participant_name'),
+     {'id': 'full_name', 'type': 'text', 'label': 'Full Name', 'placeholder': 'Enter your full name',
+      'required': True, 'options': [], 'help_text': ''}),
+    (('email', 'email_address'),
+     {'id': 'email', 'type': 'email', 'label': 'Email Address', 'placeholder': 'you@example.com',
+      'required': True, 'options': [], 'help_text': ''}),
+    (('phone', 'phone_number', 'mobile', 'contact'),
+     {'id': 'phone', 'type': 'tel', 'label': 'Phone Number', 'placeholder': '10-digit mobile',
+      'required': True, 'options': [], 'help_text': ''}),
+    (('usn', 'roll_number', 'roll_no', 'id_number'),
+     {'id': 'usn', 'type': 'text', 'label': 'USN / Roll Number', 'placeholder': 'e.g. 1SN21CS001',
+      'required': False, 'options': [], 'help_text': ''}),
+)
+
+
+# Name and email are always asked: the account, ticket and certificate use them.
+# A form the SPOC built in the builder (`chosen`) gets only these two; older
+# forms also get phone and USN back, as before (UPG-212).
+FIXED_IDENTITY = IDENTITY_FIELDS[:2]
+
+# What each team member is asked besides name and email, as the SPOC chose (UPG-212)
+# The jersey name (the name printed on a player's jersey, not the full name) is
+# asked of the lead too, off unless the SPOC asks it (UPG-427)
+MEMBER_DETAILS = (('usn', 'USN', 'text'), ('phone', 'Phone', 'tel'), ('jersey_name', 'Jersey name', 'text'))
+MEMBER_CHOICES = ('off', 'optional', 'required')
+DEFAULT_MEMBER_FIELDS = {'usn': 'optional', 'phone': 'off', 'jersey_name': 'off'}
+JERSEY_NAME_MAX = 20
+CHOICE_TYPES = ('select', 'radio', 'checkbox_group')
+
+
+def member_settings(schema) -> dict:
+    """{'usn': 'off'|'optional'|'required', 'phone': ..., 'jersey_name': ...} for a form."""
+    chosen = (schema or {}).get('member_fields') if isinstance(schema, dict) else None
+    chosen = chosen if isinstance(chosen, dict) else {}
+    return {key: chosen.get(key) if chosen.get(key) in MEMBER_CHOICES else DEFAULT_MEMBER_FIELDS[key]
+            for key, _, _ in MEMBER_DETAILS}
+
+
+def stored_member_fields(chosen) -> dict:
+    """The member settings as an event keeps them: the jersey name only when it
+    is asked (UPG-427), so a form saved without it is kept as before."""
+    settings = member_settings({'member_fields': chosen})
+    if settings['jersey_name'] == 'off':
+        settings.pop('jersey_name')
+    return settings
+
+
+def normalise_fields(fields, chosen: bool = False) -> list:
+    """Every field gets an `id` (template and seeded forms store `field_name`),
+    the identity fields come first unless the form already asks for them, and
+    each id appears once (UPG-01). A form built in the builder (`chosen`) gets
+    name and email only, always required (UPG-212)."""
+    out, seen = [], set()
+    for i, raw in enumerate(fields or []):
+        if not isinstance(raw, dict):
+            continue
+        field = dict(raw)
+        fid = field.get('id') or field.get('field_name')
+        if not fid:
+            if field.get('type') not in LAYOUT_TYPES:
+                continue  # an input nobody can name can't be answered; saving refuses these
+            fid = f'layout_{i}'
+        field['id'] = str(fid)
+        field.setdefault('type', 'text')
+        field.setdefault('label', field['id'].replace('_', ' ').title())
+        field.setdefault('options', [])
+        if field['id'] in seen:
+            continue
+        seen.add(field['id'])
+        out.append(field)
+    standards = FIXED_IDENTITY if chosen else IDENTITY_FIELDS
+    missing = [dict(standard) for ids, standard in standards if not seen.intersection(ids)]
+    if chosen:
+        fixed = {fid for ids, _ in FIXED_IDENTITY for fid in ids}
+        out = [dict(f, required=True) if f['id'] in fixed else f for f in out]
+    return missing + out
+
+
+def _get_form(event_id: str, event: Optional[dict] = None) -> Optional[dict]:
+    """The event's saved form. Whether the SPOC built it in the builder, and
+    what team members are asked, are kept on the event (`form_chosen`,
+    `form_member_fields`, UPG-212), and so are its title and description
+    (`form_title`, `form_desc`, UPG-216): the SQL store keeps only a form's fields."""
+    if event is None:
+        event_doc = db.collection('events').document(event_id).get()
+        event = (event_doc.to_dict() or {}) if event_doc.exists else {}
+    doc = db.collection('event_forms').document(event_id).get()
+    if not doc.exists:
+        return None
+    data = doc.to_dict()
+    if isinstance(data, list):
+        data = {'fields': data, 'form_title': 'Registration Form', 'form_desc': ''}
+    if isinstance(data, dict):
+        data['chosen'] = bool(event.get('form_chosen'))
+        # The title and description the SPOC gave it, kept on the event (UPG-216)
+        for key in ('form_title', 'form_desc'):
+            if isinstance(event.get(key), str):
+                data[key] = event[key]
+        data['member_fields'] = member_settings({'member_fields': event.get('form_member_fields')})
+        data['fields'] = normalise_fields(data.get('fields') or [], chosen=data['chosen'])
+        return data
+    return None
+
+
+# ── Teams (UPG-08) ─────────────────────────────────────────────────────────
+
+def team_limits(event: dict) -> tuple:
+    """(fewest, most) people in a team, the lead included; (1, 1) when the
+    event isn't a team event."""
+    limits = event.get('limits') or {}
+    lo = safe_int(limits.get('team_min') or event.get('min_team_size') or 1) or 1
+    hi = safe_int(limits.get('team_max') or event.get('max_team_size') or 1) or 1
+    if hi <= 1 and not event.get('is_team_event'):
+        return 1, 1
+    return max(lo, 1), max(hi, lo, 1)
+
+
+JERSEY_MAX = 999   # up to three digits (UPG-431)
+JERSEY_FIELD = {'type': 'number', 'min': 0, 'max': JERSEY_MAX, 'pattern': r'^\d{1,3}$',
+                'pattern_error': f"A jersey number is a whole number from 0 to {JERSEY_MAX}."}
+DOB_FIELD = {'type': 'date', 'birth_date': True}   # checked by birth_date_problem (UPG-423)
+LOGO_MIN_SIDE = 200   # pixels: a logo smaller than this shows blurred on the big screen
+
+
+# A player's date of birth and position (UPG-423): a kabaddi player raids,
+# defends or does both; no player is younger than this
+PLAYER_POSITIONS = ('Raider', 'Defender', 'All-rounder')
+MIN_PLAYER_AGE = 10
+
+
+def _kabaddi_event(event: dict) -> bool:
+    details, t = event.get('details') or {}, event.get('tournament') or {}
+    return any('kabaddi' in str(x or '').lower() for x in (details.get('sport'), t.get('sport'), event.get('title')))
+
+
+def sports_team_details(event: dict) -> dict:
+    """What a sports team gives when it registers (UPG-405): {'logo': the
+    team's logo, 'jersey': each player's jersey number}. Every sports team
+    event asks the logo; e-sports asks no jersey numbers. Other events: neither."""
+    if team_limits(event)[1] <= 1:
+        return {'logo': False, 'jersey': False}
+    from services_team_confirm import is_sports
+    if not is_sports(event):
+        return {'logo': False, 'jersey': False}
+    return {'logo': True, 'jersey': str(event.get('event_type') or '') != 'esports'}
+
+
+def player_details(event: dict) -> dict:
+    """What else a sports team's player gives (UPG-423): {'dob': the date of
+    birth, 'positions': the positions to pick from}. The players of a sports
+    team that wears jerseys (not e-sports) give a date of birth; positions
+    are kabaddi's. Both optional."""
+    players = sports_team_details(event)['jersey']
+    return {'dob': players, 'positions': PLAYER_POSITIONS if players and _kabaddi_event(event) else ()}
+
+
+def age_on(dob, today=None):
+    """Whole years from an ISO date of birth to today, or None for no date."""
+    try:
+        born = datetime.date.fromisoformat(str(dob or '').strip()[:10])
+    except ValueError:
+        return None
+    today = today or datetime.date.today()
+    return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+
+
+def birth_date_problem(value, today=None) -> str:
+    """'' for no date or a fair one, else what's wrong (UPG-423)."""
+    text = str(value or '').strip()
+    if not text:
+        return ''
+    try:
+        born = datetime.date.fromisoformat(text)
+    except ValueError:
+        return "A date of birth is a date like 2005-08-14."
+    today = today or datetime.date.today()
+    if born > today:
+        return "A date of birth can't be in the future."
+    if age_on(text, today) < MIN_PLAYER_AGE:
+        return f"A player is at least {MIN_PLAYER_AGE} years old: check the date of birth."
+    return ''
+
+
+def jersey_number(value) -> str:
+    """'07' -> '7'; '' for nothing given. Not checked here (JERSEY_FIELD is)."""
+    text = str(value or '').strip()
+    return str(int(text)) if text.isdigit() else text
+
+
+def team_fields(event: dict, existing_ids=(), member_fields=None) -> list:
+    """The team name and one name / email row per possible member, required
+    up to the team's minimum, with the USN and phone as the SPOC chose
+    (`member_settings`; USN optional and no phone by default, UPG-212). A
+    sports team also gives its logo and each player's jersey number (UPG-405)."""
+    lo, hi = team_limits(event)
+    if hi <= 1:
+        return []
+    fields = []
+    if 'team_name' not in existing_ids:
+        fields.append({'id': 'team_name', 'type': 'text', 'label': 'Team Name', 'placeholder': 'e.g. ByteCraft',
+                       'required': True, 'options': [], 'help_text': ''})
+    extra = dict(sports_team_details(event), **player_details(event))
+    if extra['logo'] and 'team_logo' not in existing_ids:
+        fields.append({'id': 'team_logo', 'type': 'file', 'label': 'Team logo', 'required': True, 'options': [],
+                       'accept': 'image/png,image/jpeg,image/webp', 'placeholder': '',
+                       'help_text': f"A clear logo: PNG, JPG or WebP, up to 2 MB, at least {LOGO_MIN_SIDE} × "
+                                    f"{LOGO_MIN_SIDE} pixels. It shows beside your team's name on the scoreboard, "
+                                    "the big screen, the fixtures and the tables."})
+    if extra['jersey'] and 'lead_jersey' not in existing_ids:
+        fields.append(dict(JERSEY_FIELD, id='lead_jersey', label='Your jersey number', required=True, options=[],
+                           placeholder='e.g. 7', help_text=''))
+    settings = member_settings({'member_fields': member_fields})
+    if settings['jersey_name'] != 'off' and 'lead_jersey_name' not in existing_ids:   # UPG-427
+        fields.append({'id': 'lead_jersey_name', 'type': 'text', 'label': 'Your jersey name',
+                       'required': settings['jersey_name'] == 'required', 'options': [], 'maxlength': JERSEY_NAME_MAX,
+                       'placeholder': 'e.g. ARJUN', 'help_text': 'The name printed on your jersey.'})
+    if extra['dob'] and 'lead_dob' not in existing_ids:
+        fields.append(dict(DOB_FIELD, id='lead_dob', label='Your date of birth', required=False, options=[],
+                           placeholder='', help_text='Optional. Your player profile shows your age, never the date.'))
+    if extra['positions'] and 'lead_position' not in existing_ids:
+        fields.append({'id': 'lead_position', 'type': 'select', 'label': 'Your position', 'required': False,
+                       'options': list(extra['positions']), 'placeholder': 'Optional', 'help_text': ''})
+    fields.append({'id': 'team_members', 'type': 'heading', 'options': [],
+                   'label': f'Team members: {lo}–{hi} people including you'})
+    asked = [('name', 'Name', 'text', 'required'), ('email', 'Email', 'email', 'required')] + [
+        (key, label, ftype, settings[key]) for key, label, ftype in MEMBER_DETAILS
+        if settings[key] != 'off' and key != 'jersey_name']
+    if extra['jersey']:
+        asked.append(('jersey', 'Jersey number', 'number', 'required'))
+    if settings['jersey_name'] != 'off':   # after the number (UPG-427)
+        asked.append(('jersey_name', 'Jersey name', 'text', settings['jersey_name']))
+    if extra['dob']:
+        asked.append(('dob', 'Date of birth', 'date', 'optional'))
+    if extra['positions']:
+        asked.append(('position', 'Position', 'select', 'optional'))
+    for i in range(1, hi):
+        for key, label, ftype, setting in asked:
+            fid = f'member_{i}_{key}'
+            if fid not in existing_ids:
+                field = {'id': fid, 'type': ftype, 'label': f'Member {i + 1} {label}', 'placeholder': '',
+                         'required': i < lo and setting == 'required', 'options': [], 'help_text': ''}
+                if key == 'position':
+                    field.update(options=list(extra['positions']), placeholder='Optional')
+                if key == 'jersey_name':
+                    field['maxlength'] = JERSEY_NAME_MAX
+                fields.append(dict(JERSEY_FIELD, **field) if key == 'jersey' else
+                              dict(DOB_FIELD, **field) if key == 'dob' else field)
+    return fields
+
+
+def logo_optional(schema: dict) -> dict:
+    """The form as the hosting SPOC fills it adding a team by hand (UPG-244):
+    the team's logo can be added later on the tournament page (UPG-405)."""
+    schema['fields'] = [dict(f, required=False) if f.get('id') == 'team_logo' else f for f in schema['fields']]
+    return schema
+
+
+def jersey_problem(event: dict, lead_jersey, members: list) -> str:
+    """'' when a sports team's every player has a jersey number, else what to
+    fix (UPG-405); always '' for other events. Two players may share a number
+    (the owner, UPG-460): the SPOC sets the real ones on the Jersey numbers page."""
+    if not sports_team_details(event)['jersey']:
+        return ''
+    players = [('You', jersey_number(lead_jersey))] + [
+        (str(m.get('name') or 'A member'), jersey_number(m.get('jersey'))) for m in members]
+    for who, number in players:
+        if not number:
+            return "Give your own jersey number." if who == 'You' else f"Give {who}'s jersey number."
+    return ''
+
+
+# The questions that say who someone is; they open the form (UPG-150)
+IDENTITY_FIELD_IDS = frozenset((
+    'full_name', 'name', 'lead_name', 'email', 'phone', 'whatsapp', 'usn', 'roll_no', 'roll_number',
+    'department', 'dept', 'branch', 'year', 'semester', 'section', 'gender', 'college',
+))
+
+
+def form_sections(fields, chosen: bool = False) -> dict:
+    """The form's fields in the page's sections: {'participant', 'details', 'team'}.
+    A heading, paragraph or divider goes with the field after it, so a builder
+    heading stays above the questions it introduces. In a form the SPOC built
+    (`chosen`) only the who-you-are questions they put at the top open the
+    form; every other question stays where they put it (UPG-216)."""
+    groups: dict = {'participant': [], 'details': [], 'team': []}
+    pending: list = []
+    leading = True   # still in the run of who-you-are questions at the top
+    for f in fields or []:
+        if f.get('id') == 'team_members':   # team_fields' own heading always belongs to the team
+            groups['team'].append(f)
+            continue
+        if f.get('type') in LAYOUT_TYPES:
+            pending.append(f)
+            continue
+        fid = str(f.get('id') or '')
+        if fid in ('team_name', 'team_logo', 'lead_jersey', 'lead_jersey_name', 'lead_dob', 'lead_position') \
+                or fid.startswith('member_'):
+            key = 'team'
+        elif fid in IDENTITY_FIELD_IDS and not (chosen and (pending or not leading)):
+            key = 'participant'
+        else:
+            key = 'details'
+            leading = False
+        groups[key] += pending + [f]
+        pending = []
+    groups['details'] += pending
+    return groups
+
+
+_MEMBER_FIELD = re.compile(r'^member_(\d+)_')
+
+
+def team_blocks(team) -> dict:
+    """The team section for the page: {'general': the team name and headings,
+    'members': [{'n', 'required', 'fields'}]}, one block per member, so one
+    member's fields never sit beside another's. `n` is the number people see
+    (member_1_* is "Member 2"; the lead is member 1); inside a block the label
+    drops the "Member N " the block's title already says."""
+    general: list = []
+    members: dict = {}
+    for f in team or []:
+        m = _MEMBER_FIELD.match(str(f.get('id') or ''))
+        if not m or f.get('type') in LAYOUT_TYPES:
+            general.append(f)
+            continue
+        n = int(m.group(1)) + 1
+        label = str(f.get('label') or '')
+        prefix = f'Member {n} '
+        short = label[len(prefix):] if label.startswith(prefix) and len(label) > len(prefix) else label
+        block = members.setdefault(n, {'n': n, 'required': False, 'fields': []})
+        block['fields'].append({**f, 'label': short[:1].upper() + short[1:]})
+        block['required'] = block['required'] or bool(f.get('required'))
+    return {'general': general, 'members': [members[n] for n in sorted(members)]}
+
+
+def registration_schema(event_id: str, event: dict) -> dict:
+    """The form a registrant fills: the event's form (or the default one)
+    plus the team fields its limits call for."""
+    schema = _get_form(event_id, event) or _simple_schema_fallback(is_team=team_limits(event)[1] > 1)
+    schema['fields'] = schema['fields'] + team_fields(event, {f['id'] for f in schema['fields']},
+                                                      member_settings(schema))
+    return schema
+
+
+def _email_new_account(email: str, name: str, reason: str = '', registration=None) -> str:
+    """A new account's one email: the one-time set-password link, with the
+    registration's confirmation when given (UPG-152). Returns 'sent', 'limit'
+    or 'failed', and tells the visitor what happened."""
+    status = email_login_link(db, email, name, 'set_password', reason, registration)
+    if status == 'sent':
+        flash("🆕 We've emailed you a link to set your password. It works once, for 48 hours.", "info")
+    else:   # today's email limit is reached, or the mail provider failed
+        flash(REGISTRATION_EMAIL_NOT_SENT, "warning")
+    return status
+
+
+def submitted_members(form, lead_email: str, hi: int):
+    """(members, error) from the member_N_* fields a browser sent."""
+    numbers = sorted({int(m.group(1)) for key in form.keys()
+                      for m in [re.fullmatch(r'member_(\d+)_name', key)]
+                      if m and str(form.get(key) or '').strip()})
+    if numbers and numbers[-1] >= hi:
+        return [], f"A team can have at most {hi} people."
+    members, seen = [], {lead_email}
+    for i in numbers:
+        email = str(form.get(f'member_{i}_email') or '').strip().lower()
+        if email and email in seen:
+            return [], f"{email} is listed twice; each team member needs their own email."
+        if email:
+            seen.add(email)
+        member = {'role': 'Member', 'name': str(form.get(f'member_{i}_name')).strip(), 'email': email,
+                  'usn': str(form.get(f'member_{i}_usn') or '').strip().upper(),
+                  'phone': str(form.get(f'member_{i}_phone') or '').strip()}
+        jersey = jersey_number(form.get(f'member_{i}_jersey'))
+        if jersey:   # a sports team's player (UPG-405)
+            member['jersey'] = jersey
+        for key in ('dob', 'position', 'jersey_name'):   # a sports team's player (UPG-423, UPG-427)
+            value = ' '.join(str(form.get(f'member_{i}_{key}') or '').split())[:JERSEY_NAME_MAX if key == 'jersey_name' else None]
+            if value:
+                member[key] = value
+        members.append(member)
+    return members, ''
+
+
+def new_team_code(db_client) -> str:
+    """A 6-character invite code no other registration uses."""
+    import secrets
+    import string
+    alphabet = string.ascii_uppercase + string.digits
+    for _ in range(10):
+        code = ''.join(secrets.choice(alphabet) for _ in range(6))
+        if not list(db_client.collection('registrations').where('team_code', '==', code).limit(1).stream()):
+            return code
+    raise RuntimeError('Could not find a free team code')
+
+
+def _validate_submission(schema: dict, form_data: dict) -> list:
+    """The error messages, in field order."""
+    return [msg for _, msg in _field_errors(schema, form_data)]
+
+
+def _field_errors(schema: dict, form_data: dict) -> list:
+    """(field id, message) for each problem, so the form can show it beside
+    the field (UPG-26)."""
+    class _Errors(list):
+        """Each check below appends a message; it's recorded with the field being checked."""
+        def append(self, msg):
+            super().append((fid, msg))
+    errors = _Errors()
+    for field in schema.get('fields', []):
+        fid      = field.get('id', '')
+        label    = field.get('label', fid)
+        required = field.get('required', False)
+        ftype    = field.get('type', 'text')
+
+        if ftype in ('heading', 'paragraph', 'divider'):
+            continue
+
+        # Conditional dependency evaluation
+        depends_on = field.get('depends_on')
+        if depends_on and isinstance(depends_on, dict):
+            dep_field = depends_on.get('field')
+            expected_val = depends_on.get('value')
+            expected_in = depends_on.get('in')
+            actual_val = form_data.get(dep_field)
+
+            if expected_val is not None:
+                if str(actual_val or '').strip().lower() != str(expected_val).strip().lower():
+                    continue
+            elif expected_in is not None and isinstance(expected_in, (list, tuple)):
+                clean_in = [str(x).strip().lower() for x in expected_in]
+                if str(actual_val or '').strip().lower() not in clean_in:
+                    continue
+
+        raw = form_data.get(fid)
+        if isinstance(raw, list):
+            value = raw
+        else:
+            value = str(raw or '').strip()
+
+        if required:
+            if not value or value == []:
+                errors.append(f"'{label}' is required.")
+                continue
+
+        # Custom Regex validation
+        pattern = field.get('pattern') or field.get('regex')
+        if pattern and value:
+            try:
+                if not re.search(pattern, str(value)):
+                    err_msg = field.get('pattern_error') or f"'{label}' is not in the required format."
+                    errors.append(err_msg)
+            except re.error:
+                pass
+
+        # A choice must be one the SPOC offered (UPG-212)
+        options = [str(o) for o in field.get('options') or [] if str(o).strip()]
+        if ftype in CHOICE_TYPES and value and options:
+            chosen = value if isinstance(value, list) else [value]
+            if any(str(v) not in options for v in chosen):
+                errors.append(f"Choose from the options given for '{label}'.")
+                continue
+
+        if field.get('birth_date') and value:   # a player's date of birth (UPG-423)
+            problem = birth_date_problem(value)
+            if problem:
+                errors.append(problem)
+                continue
+
+        if ftype == 'email' and value:
+            if not re.match(r'^[^@]+@[^@]+\.[^@]+$', str(value)):
+                errors.append(f"'{label}' must be a valid email address.")
+
+        if ftype == 'tel' and value:
+            digits = re.sub(r'\D', '', str(value))
+            if len(digits) < 10:
+                errors.append(f"'{label}' must be a valid phone number (min 10 digits).")
+
+        if ftype == 'number' and value:
+            try:
+                n = float(str(value))
+                if field.get('min') != '' and field.get('min') is not None:
+                    if n < float(field['min']):
+                        errors.append(f"'{label}' must be at least {field['min']}.")
+                if field.get('max') != '' and field.get('max') is not None:
+                    if n > float(field['max']):
+                        errors.append(f"'{label}' must be at most {field['max']}.")
+            except (ValueError, TypeError):
+                errors.append(f"'{label}' must be a number.")
+
+    return list(errors)
+
+
+def _extract_core(answers: dict) -> dict:
+    """
+    Pull the standard identity fields out of any form's answers dict.
+    Handles both standard field IDs and common synonyms.
+    """
+    def first(*keys):
+        for k in keys:
+            v = str(answers.get(k) or '').strip()
+            if v:
+                return v
+        return ''
+
+    return {
+        'email':     first('email', 'email_address'),
+        'full_name': first('full_name', 'name', 'participant_name'),
+        'phone':     first('phone', 'phone_number', 'mobile', 'contact'),
+        'usn':       first('usn', 'roll_number', 'roll_no', 'id_number'),
+        'team_name': first('team_name', 'team', 'group_name') or 'Individual',
+    }
+
+
+def _simple_schema_fallback(is_team: bool = False) -> dict:
+    """Used only when event_forms doc is truly missing (should not happen post-wizard)."""
+    fields = [
+        {'id': 'full_name', 'type': 'text',  'label': 'Full Name',
+         'placeholder': 'Enter your full name', 'required': True,
+         'options': [], 'help_text': ''},
+        {'id': 'email',     'type': 'email', 'label': 'Email Address',
+         'placeholder': 'you@example.com',    'required': True,
+         'options': [], 'help_text': ''},
+        {'id': 'phone',     'type': 'tel',   'label': 'Phone Number',
+         'placeholder': '10-digit mobile',   'required': True,
+         'options': [], 'help_text': ''},
+        {'id': 'usn',       'type': 'text',  'label': 'USN / Roll Number',
+         'placeholder': 'e.g. 1SN21CS001',   'required': False,
+         'options': [], 'help_text': ''},
+    ]
+    if is_team:
+        fields.append({'id': 'team_name', 'type': 'text',
+                        'label': 'Team Name', 'placeholder': 'Leave blank if solo',
+                        'required': False, 'options': [], 'help_text': ''})
+    return {
+        'form_type': 'simple', 'form_title': 'Event Registration',
+        'form_desc': 'Fill in your details to register.', 'fields': fields
+    }
+
+
+# =========================================================
+# 1. FORM BUILDER PAGE  (edit after creation)
+# =========================================================
+@forms_bp.route('/builder/<event_id>')
+@login_required
+@role_required(BUILDER_ROLES)
+def builder(event_id):
+    event_doc = db.collection('events').document(event_id).get()
+    if not event_doc.exists:
+        flash("Event not found.", "danger")
+        return redirect('/coordinator/dashboard')
+
+    event       = event_doc.to_dict()
+    event['id'] = event_id
+    if not _allowed(event_id, event, 'edit_event'):
+        abort(403)
+    existing    = _get_form(event_id, event)
+
+    return render_template(
+        'coordinator/form_builder.html',
+        event=event,
+        existing_form=existing,
+        form_json=json.dumps(existing) if existing else 'null',
+        back_url=_builder_back_url(event_id),
+        team=team_limits(event),
+    )
+
+
+def _builder_back_url(event_id: str) -> str:
+    """Where the builder's Back goes: the page on this site that opened it,
+    else the event's page for the user's role (UPG-79). "This site" is
+    a trusted address (utils_links: BASE_URL, TRUSTED_HOSTS, and in development
+    this machine, the local network or an ngrok tunnel), never any other Host a
+    client could forge (BLK-16, UPG-91); only the path is kept."""
+    from urllib.parse import urlparse
+    from utils_email import _configured_base_url
+    from utils_links import is_trusted_host
+    production = str(current_app.config.get('FLASK_ENV') or '').lower() == 'production'
+    for candidate in (request.args.get('next'), request.referrer):
+        if not candidate or '\\' in candidate:
+            continue
+        url = urlparse(candidate)
+        if url.scheme and url.scheme not in ('http', 'https'):
+            continue
+        if url.netloc and not is_trusted_host(url.netloc, _configured_base_url(), production):
+            continue
+        if not url.path.startswith('/') or url.path.startswith('//') or url.path.startswith('/forms/builder/'):
+            continue
+        return url.path + (f'?{url.query}' if url.query else '')
+    role = session.get('role')
+    if role in ('SuperAdmin', 'Super Admin'):
+        return '/admin/events'
+    if role == 'ClubSPOC':
+        return f'/spoc/event/{event_id}/review'
+    return '/coordinator/dashboard'
+
+
+def _builder_problem(fields_raw) -> str:
+    """Why a form from the builder can't be saved, or '' (UPG-212)."""
+    if not isinstance(fields_raw, list):
+        return "The form's fields are missing."
+    seen = set()
+    for i, f in enumerate(fields_raw, start=1):
+        if not isinstance(f, dict):
+            return f"Field {i} isn't a field."
+        ftype, fid = f.get('type', 'text'), str(f.get('id') or f.get('field_name') or '')
+        name = f.get('label') or ftype
+        if ftype not in SUPPORTED_FIELD_TYPES:
+            return f"Field {i} ('{name}') has a type the form can't show: {ftype}."
+        if ftype in LAYOUT_TYPES:
+            continue
+        if not str(f.get('label') or '').strip():
+            return f"Field {i} needs a label, so people know what to answer."
+        if fid in seen:
+            return f"Two fields share the id '{fid}'."
+        seen.add(fid)
+        if fid == 'team_members' or _MEMBER_FIELD.match(fid):
+            return (f"'{name}': team members' questions come from the event's team size; "
+                    "choose them under Team members.")
+        if ftype in CHOICE_TYPES and not [o for o in f.get('options') or [] if str(o).strip()]:
+            return f"'{name}' needs at least one option."
+    return ''
+
+
+def chosen_form_fields(fields_raw) -> tuple:
+    """(fields, problem) for a form the SPOC set out question by question, in
+    the builder or in step 6 of the event wizard (UPG-219): the questions as
+    stored, choices trimmed and once each, or the reason it can't be saved."""
+    problem = _builder_problem(fields_raw)
+    if problem:
+        return [], problem
+    fields = []
+    for i, f in enumerate(fields_raw):
+        options = f.get('options') or []
+        if f.get('type') in CHOICE_TYPES:
+            options = list(dict.fromkeys(str(o).strip()[:80] for o in options if str(o).strip()))
+        fields.append({
+            'id':          str(f.get('id') or f.get('field_name') or f'layout_{i}')[:60],
+            'type':        f.get('type', 'text'),
+            'label':       str(f.get('label') or '')[:200],
+            'placeholder': str(f.get('placeholder') or '')[:200],
+            'required':    bool(f.get('required', False)),
+            'options':     options,
+            'min':         f.get('min', ''),
+            'max':         f.get('max', ''),
+            'help_text':   str(f.get('help_text') or '')[:500],
+        })
+    return fields, ''
+
+
+# =========================================================
+# 2. SAVE FORM (AJAX — from builder or wizard)
+# =========================================================
+@forms_bp.route('/save/<event_id>', methods=['POST'])
+@login_required
+@role_required(BUILDER_ROLES)
+def save_form(event_id):
+    event_doc = db.collection('events').document(event_id).get()
+    if not event_doc.exists:
+        return jsonify({'success': False, 'error': 'Event not found'}), 404
+    if not _allowed(event_id, event_doc.to_dict(), 'edit_event'):
+        return jsonify({'success': False, 'error': 'Not authorised for this event'}), 403
+    try:
+        payload    = request.get_json(force=True) or {}
+        form_type  = payload.get('form_type', 'simple')
+        fields_raw = payload.get('fields', [])
+        form_title = payload.get('form_title', 'Registration Form').strip()
+        form_desc  = payload.get('form_desc', '').strip()
+        # The builder sends `chosen`: the form is exactly what the SPOC built (UPG-212)
+        chosen     = bool(payload.get('chosen'))
+        if chosen:
+            problem = _builder_problem(fields_raw)
+            if problem:
+                return jsonify({'status': 'error', 'message': problem}), 400
+
+        clean_fields = []
+        for i, f in enumerate(fields_raw):
+            fid = f.get('id') or f.get('field_name')
+            if not fid and f.get('type') not in LAYOUT_TYPES:
+                # Its answers would have no name to be stored under (UPG-01)
+                return jsonify({'status': 'error', 'message':
+                                f"Field {i + 1} ('{f.get('label') or f.get('type') or 'untitled'}') has no id."}), 400
+            options = f.get('options', [])
+            if chosen and f.get('type') in CHOICE_TYPES:
+                options = list(dict.fromkeys(str(o).strip()[:80] for o in options if str(o).strip()))
+            clean_fields.append({
+                'id':          fid or f"layout_{i}",
+                'type':        f.get('type', 'text'),
+                'label':       f.get('label', f'Field {i+1}'),
+                'placeholder': f.get('placeholder', ''),
+                'required':    bool(f.get('required', False)),
+                'options':     options,
+                'min':         f.get('min', ''),
+                'max':         f.get('max', ''),
+                'help_text':   f.get('help_text', ''),
+            })
+
+        schema = {
+            'event_id':   event_id,
+            'form_type':  form_type,
+            'form_title': form_title,
+            'form_desc':  form_desc,
+            'fields':     clean_fields,
+            'created_by': session.get('user_id'),
+            'updated_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+
+        db.collection('event_forms').document(event_id).set(schema)
+        db.collection('events').document(event_id).update({
+            'has_custom_form': True,
+            'form_type':       form_type,
+            # UPG-212: built in the builder (only name and email fixed) and the members' questions
+            'form_chosen':     chosen,
+            'form_member_fields': stored_member_fields(payload.get('member_fields')),
+            # UPG-216: the title and description, which the SQL store drops from the form
+            'form_title':      form_title[:200] or 'Registration Form',
+            'form_desc':       form_desc[:1000],
+        })
+
+        log_action(db, "FORM_SAVED",
+                   f"Event {event_id}: {form_type} form saved by {session.get('user_id')}")
+        return jsonify({'status': 'ok', 'message': 'Form saved!'})
+
+    except Exception as exc:
+        return jsonify({'status': 'error', 'message': str(exc)}), 500
+
+
+# =========================================================
+# 3. PUBLIC REGISTRATION PAGE
+# =========================================================
+# =========================================================
+# 3b. THE ORGANISER ADDS A TEAM BY HAND (UPG-244)
+# =========================================================
+ADD_TEAM = 'team'
+
+
+def _adding_by_hand() -> bool:
+    """The request is a SPOC adding a team through the event's form (asked
+    with `add=team`); the permission is checked by `_organiser_for`."""
+    return (request.values.get('add') or '') == ADD_TEAM and bool(session.get('user_id'))
+
+
+def _organiser_for(event_id: str, event: dict) -> bool:
+    """True when the hosting SPOC adds a team by hand; 403 when someone else
+    asks for it; False for an ordinary sign-up."""
+    if (request.values.get('add') or '') != ADD_TEAM:
+        return False
+    from services_permission import can
+    if not session.get('user_id') or not can(session, 'edit_event', dict(event, id=event_id), db=db):
+        abort(403)
+    return True
+
+
+@forms_bp.route('/register/<event_id>')
+@limiter.limit("60 per hour")
+def registration_page(event_id):
+    # Fetch event
+    event_doc = db.collection('events').document(event_id).get()
+    if not event_doc.exists:
+        return render_template('404.html'), 404
+
+    event       = event_doc.to_dict()
+    event['id'] = event_id
+    organiser = _organiser_for(event_id, event)   # the SPOC adds a team by hand (UPG-244)
+
+    if registration_closed(event) and not organiser:
+        import services_registration_state
+        return render_template('public/registration_closed.html', event=event,
+                               reg_state=services_registration_state.for_event(db, event_id, event))
+
+    import services_share   # the share link the visitor came from, kept on the form (UPG-162)
+    share_src = services_share.capture(session, event_id, event, request.args)
+
+    # Capacity check
+    max_cap = safe_int((event.get('limits') or {}).get('max_participants', 0)) or safe_int(event.get('capacity', 0))
+    from services_waitlist import joins_waitlist   # also while teams wait for the SPOC (UPG-243)
+    is_waitlist = joins_waitlist(db, event_id, event, safe_int(event.get('registration_count', 0)), max_cap) \
+        and not organiser
+
+    # Already registered?
+    is_registered = False
+    if session.get('user_id') and not organiser:
+        q = (db.collection('registrations')
+               .where(filter=FieldFilter('event_id',   '==', event_id))
+               .where(filter=FieldFilter('lead_email', '==', session['user_id']))
+               .limit(1).stream())
+        is_registered = any(q)
+
+    # The event's form, plus team fields from its team limits (UPG-08)
+    schema = registration_schema(event_id, event)
+    if organiser:
+        schema = logo_optional(schema)   # the SPOC adds it later on the tournament page (UPG-405)
+
+    # A form sent back with errors keeps what was typed, with each message
+    # beside its field (UPG-26)
+    state = session.pop('form_state', None) if 'form_state' in session else None
+    if not state or state.get('event_id') != event_id:
+        state = {}
+
+    # "Back" returns to the page the visitor came from (UPG-92): the home page's
+    # event popup, the catalogue or the event page; kept across a resubmission
+    from utils_links import back_path
+    remembered = session.get('register_back') or {}
+    back_url = back_path('', skip_prefix=f'/forms/register/{event_id}')
+    if back_url:
+        session['register_back'] = {event_id: back_url}
+    else:
+        back_url = remembered.get(event_id) or f'/event/{event_id}'
+    if organiser:
+        back_url = f'/coordinator/registrations/{event_id}'
+
+    import uuid
+    return render_template(
+        'public/registration_form.html',
+        back_url=back_url,
+        event=event,
+        schema=schema,
+        sections=(sections := form_sections(schema.get('fields'), schema.get('chosen'))),   # the full-page layout (UPG-150)
+        team_blocks=team_blocks(sections['team']),                    # one block per member
+        team_size=team_limits(event),
+        is_registered=is_registered,
+        is_waitlist=is_waitlist,
+        values=state.get('values') or {},
+        field_errors=state.get('errors') or {},
+        submission_id=uuid.uuid4().hex,   # one registration per form, however often it's sent
+        ticket_types=_ticket_types_offered(event, event_id),   # UPG-155
+        share_src=share_src,
+        organiser=organiser,   # UPG-244
+        organiser_paid=organiser and _paid_event(event),
+    )
+
+
+def _seats_note(event_id: str) -> str:
+    """" The event now has N registrations for M seats." after adding by hand."""
+    from routes_coordinator import _seat_count
+    return _seat_count(event_id, {})
+
+
+def _registration_fee_of(event: dict, ptype: str, ticket_id: str, people: int) -> float:
+    from services_payments import PaymentError, registration_fee
+    try:
+        return registration_fee(event, ptype, ticket_id, people)
+    except PaymentError:
+        return 1.0   # a ticket type to choose is a priced event
+
+
+def _paid_event(event: dict) -> bool:
+    """Whether anyone pays to register (the fee, or a priced ticket type)."""
+    import services_ticket_types as tt
+    types = tt.types_for(event)
+    if types:
+        return any(float(t.get('price') or 0) > 0 for t in types)
+    from services_participants import allowed_types
+    from services_payments import fee_for
+    return any(fee_for(event, t) > 0 for t in allowed_types(event))
+
+
+def _ticket_types_offered(event, event_id):
+    """The ticket types the form lists (UPG-155); [] for an event without them."""
+    import services_ticket_types as tt
+    if not tt.types_for(event):
+        return []
+    return tt.offered(event, event_id)
+
+
+# =========================================================
+# 4. SUBMIT FORM
+# =========================================================
+@forms_bp.route('/submit/<event_id>', methods=['POST'])
+@limiter.limit("20 per hour", exempt_when=_adding_by_hand)   # a SPOC adds many teams (UPG-244)
+def submit_form(event_id):
+    sub_key = ''
+    organiser = False
+    form_url = f'/forms/register/{event_id}'
+    try:
+        event_doc = db.collection('events').document(event_id).get()
+        if not event_doc.exists:
+            flash("Event not found.", "danger")
+            return redirect('/')
+        event_data = event_doc.to_dict()
+        organiser = _organiser_for(event_id, event_data)   # the hosting SPOC adds a team (UPG-244)
+        form_url = f'/forms/register/{event_id}' + (f'?add={ADD_TEAM}' if organiser else '')
+
+        schema = registration_schema(event_id, event_data)
+        if organiser:
+            schema = logo_optional(schema)
+
+        # Collect all answers — values are str for most fields, list[str] for checkbox_group
+        answers: dict = {}
+        for field in schema.get('fields', []):
+            fid = field.get('id') or field.get('field_name', '')
+            if not fid or field.get('type') in ('heading', 'paragraph', 'divider'):
+                continue
+            if field.get('type') == 'checkbox_group':
+                answers[fid] = request.form.getlist(fid)
+            elif field.get('type') == 'file':   # the team's logo (UPG-405): its name until it's saved
+                upload = request.files.get(fid)
+                answers[fid] = str(upload.filename or '') if upload else ''
+            else:
+                answers[fid] = request.form.get(fid, '').strip()
+
+        # Always capture core identity fields if present in request.form
+        for core_key in ('full_name', 'name', 'email', 'phone', 'usn', 'team_name', 'ticket_tier', 'ticket_type'):
+            if core_key in request.form and core_key not in answers:
+                answers[core_key] = request.form.get(core_key, '').strip()
+
+        # BLK-02: a logged-in visitor always registers as their own account;
+        # a SPOC adding a team registers the lead they typed in (UPG-244)
+        session_email = '' if organiser else (session.get('user_id') or '').strip().lower()
+        if session_email:
+            for email_key in ('email', 'email_address'):
+                if email_key in answers:
+                    answers[email_key] = session_email
+
+        # Validate: messages go beside their fields, and the form keeps what was typed (UPG-26)
+        field_errors = _field_errors(schema, answers)
+
+        # Student, faculty or external, as the event allows; faculty and
+        # external participants give designation and institution (UPG-12)
+        from services_participants import PLURALS, NEEDS_AFFILIATION, allowed_types
+        allowed = allowed_types(event_data)
+        ptype = (request.form.get('participant_type') or allowed[0]).strip().lower()
+        designation = (request.form.get('designation') or '').strip()[:150]
+        institution = (request.form.get('institution') or '').strip()[:200]
+        answers.update(participant_type=ptype, designation=designation, institution=institution)
+        if ptype not in allowed:
+            field_errors.append(('participant_type', 'This event is for ' +
+                                 ' and '.join(PLURALS[t] for t in allowed) + ' only.'))
+        elif ptype in NEEDS_AFFILIATION:
+            if not designation:
+                field_errors.append(('designation', 'Please give your designation.'))
+            if not institution:
+                field_errors.append(('institution', 'Please give your institution.'))
+        if ptype not in NEEDS_AFFILIATION:
+            designation = institution = ''
+        # An invitation-only event takes outside participants from the listed
+        # institutions, told by their email address (UPG-270). The hosting
+        # SPOC adding a team by hand decides for themselves.
+        if ptype in allowed and not organiser:
+            import services_reach as reach
+            why_not, invited_from = reach.refusal(
+                event_data, ptype, _extract_core(answers)['email'] or session_email)
+            if why_not:
+                field_errors.append(('email', why_not))
+            elif invited_from:
+                institution = invited_from
+                answers['institution'] = institution
+        # The ticket type: on sale today, for this participant type, a seat
+        # left (UPG-155). Events without ticket types skip this.
+        import services_ticket_types as tt
+        ticket_id = (request.form.get('ticket_type') or '').strip()
+        ticket, ticket_error = tt.check_choice(event_data, event_id, ticket_id, ptype)
+        if ticket_error:
+            field_errors.append(('ticket_type', ticket_error))
+        if field_errors:
+            for _, err in field_errors:
+                flash(err, 'danger')
+            session['form_state'] = {'event_id': event_id, 'values': answers,
+                                     'errors': {fid: msg for fid, msg in field_errors}}
+            return redirect(form_url)
+
+        # Extract core fields. BLK-02: registration never logs anyone in.
+        core = _extract_core(answers)
+        # An existing account's email registers without logging in (UPG-97)
+        email, without_login = resolve_registrant(db, core['email'], by_organiser=organiser)
+        full_name = core['full_name'] or (session.get('name', '') if session_email else '')
+        phone     = core['phone']
+        usn       = core['usn'].upper()
+        team_name = core['team_name']
+
+        if not email or not full_name:
+            flash("Name and email are required.", "warning")
+            return redirect(form_url)
+
+        if registration_closed(event_data) and not organiser:
+            flash("Registration is closed for this event.", "warning")
+            return redirect(form_url)
+
+        # Team size is checked here, whatever the browser sent (UPG-08)
+        team_min, team_max = team_limits(event_data)
+        team_members, team_error = submitted_members(request.form, email, team_max)
+        if team_max > 1 and not team_error and not (team_min <= 1 + len(team_members) <= team_max):
+            team_error = f"A team needs {team_min}–{team_max} people, you included."
+        if team_max > 1 and not team_error and team_name in ('', 'Individual'):
+            team_error = "Please give your team a name."
+        if team_error:
+            flash(team_error, 'danger')
+            return redirect(form_url)
+        # A sports team: every player's jersey number (UPG-405; a number may repeat, UPG-460); the form keeps what was typed
+        jersey_error = jersey_problem(event_data, answers.get('lead_jersey'), team_members)
+        if jersey_error:
+            flash(jersey_error, 'danger')
+            session['form_state'] = {'event_id': event_id, 'values': answers, 'errors': {}}
+            return redirect(form_url)
+        if organiser and _registration_fee_of(event_data, ptype, ticket_id, 1 + len(team_members)) > 0:
+            flash("This event has a fee, so a team can't be added by hand: the team registers and pays online.",
+                  'warning')
+            return redirect(f'/coordinator/registrations/{event_id}')
+
+        # Placement drives: only students who meet the company's rules (UPG-57)
+        from services_placement import eligibility, is_placement
+        if is_placement(event_data):
+            prof = db.collection('users').document(email).get()
+            ok, reason = eligibility(event_data, (prof.to_dict() or {}) if prof.exists else None)
+            if not ok:
+                flash(reason, 'danger')
+                return redirect(form_url)
+
+        # Duplicate check
+        existing = list(
+            db.collection('registrations')
+              .where(filter=FieldFilter('event_id',   '==', event_id))
+              .where(filter=FieldFilter('lead_email', '==', email))
+              .limit(1).stream()
+        )
+        if existing:
+            if organiser:
+                flash(f"{email} is already registered for this event; nothing was added.", "warning")
+                return redirect(form_url)
+            flash("🚫 You have already registered for this event.", "warning")
+            return redirect('/')
+
+        # DPDP: nobody is registered, and no account is created, without
+        # agreeing to the privacy notice (UPG-22)
+        from services_privacy import consent_given, consent_record, record_consent
+        if not consent_given(request.form):
+            flash("Please tick the box to agree to the privacy notice; we can't register you without it.", 'danger')
+            session['form_state'] = {'event_id': event_id, 'values': answers,
+                                     'errors': {'privacy_consent': "Tick this box to register."}}
+            return redirect(form_url)
+
+        # A sports team's logo (UPG-405): checked and saved before anything else is
+        team_logo = ''
+        upload = request.files.get('team_logo') if sports_team_details(event_data)['logo'] else None
+        if upload and upload.filename:
+            import services_sports
+            try:
+                team_logo = services_sports.store_logo(
+                    event_id, upload.read(services_sports.LOGO_MAX_BYTES + 1), LOGO_MIN_SIDE)
+            except services_sports.TournamentError as exc:
+                flash(str(exc), 'danger')
+                session['form_state'] = {'event_id': event_id, 'values': answers, 'errors': {'team_logo': str(exc)}}
+                return redirect(form_url)
+            answers['team_logo'] = team_logo
+
+        # One registration per form, however many times it's sent (UPG-26)
+        from services_idempotency import claim_submission, finish_submission, submission_result
+        sub_key = (request.form.get('submission_id') or '').strip()[:64]
+        if sub_key and not claim_submission(sub_key):
+            done = submission_result(sub_key)
+            flash("We already have this form: it was sent twice, and we registered it once.", "info")
+            if done == 'pending_payment':
+                return redirect(f'/payment/checkout/{event_id}')
+            if done and done not in ('waitlist',) and session.get('reg_confirmed'):
+                return redirect('/registration/confirmed')
+            return redirect('/participant/dashboard' if session_email else f'/event/{event_id}')
+
+        # New email: an unverified account nobody can log in to until the
+        # emailed one-time link is used (never a password in email or session)
+        is_new_user = not session_email and not without_login
+        if is_new_user:
+            # A set-password link, never a password (UPG-33); faculty and external
+            # participants keep the participant role and their own type (UPG-12)
+            created = create_unverified_account(db, email, full_name, phone, participant_type=ptype,
+                                                designation=designation, institution=institution,
+                                                from_registration=True)
+            # The link goes in the registration's one email, sent below once
+            # the outcome is known (UPG-152); if not created, another tab made
+            # the account a moment ago and sends it (UPG-115)
+            is_new_user = created
+        elif session_email:
+            # An existing account takes the type the first time it's given (UPG-12);
+            # never from someone who isn't logged in (UPG-97)
+            prof = db.collection('users').document(email).get()
+            if prof.exists and not (prof.to_dict() or {}).get('participant_type'):
+                db.collection('users').document(email).update(
+                    {'participant_type': ptype, 'designation': designation, 'institution': institution})
+
+        # Members: the lead, then the team's other members (UPG-08)
+        members = [{'role': 'Lead', 'name': full_name,
+                    'email': email, 'usn': usn, 'phone': phone}] + (team_members if team_max > 1 else [])
+        lead_jersey = jersey_number(answers.get('lead_jersey'))
+        if lead_jersey and team_max > 1:   # a sports team's lead plays too (UPG-405)
+            members[0]['jersey'] = lead_jersey
+            answers['lead_jersey'] = lead_jersey
+        for key in ('dob', 'position', 'jersey_name'):   # and gives the same as the others (UPG-423, UPG-427)
+            if team_max > 1 and str(answers.get(f'lead_{key}') or '').strip():
+                members[0][key] = ' '.join(str(answers[f'lead_{key}']).split())[:JERSEY_NAME_MAX]
+
+        # Build registration
+        reg_id   = generate_reg_id()
+        reg_data = {
+            'reg_id':          reg_id,
+            'event_id':        event_id,
+            'event_title':     event_data.get('title'),
+            'lead_email':      email,
+            'lead_name':       full_name,
+            'lead_usn':        usn,
+            'lead_phone':      phone,
+            'team_name':       team_name,
+            'members':         members,
+            'member_count':    len(members),
+            'attendance':      'Pending',
+            'registered_at':   datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'is_eliminated':   False,
+            'current_round':   1,
+            'form_answers':    answers,
+            'form_type':       schema.get('form_type', 'simple'),
+            'privacy_consent': consent_record(),   # time and notice version (UPG-22)
+            'participant_type': ptype,             # UPG-12
+            'designation':     designation,
+            'institution':     institution,
+        }
+        if ticket is not None:   # UPG-155
+            reg_data.update(ticket_type_id=ticket['id'], ticket_type_name=ticket['name'])
+        if team_logo:   # shown wherever the team is (UPG-405)
+            reg_data['team_logo'] = team_logo
+        import services_share
+        source = services_share.for_submission(session, event_id, event_data, request.form)
+        if source:   # the share link it came from (UPG-162); carried through payment and the waitlist
+            reg_data['source'] = source
+        if organiser:   # added by hand (UPG-244)
+            reg_data.update(added_by=(session.get('user_id') or '').strip().lower(),
+                            added_at=datetime.datetime.now(datetime.timezone.utc).isoformat())
+        if request.form.get('whatsapp_opt_in') == 'yes':   # saved with the time (UPG-147)
+            reg_data.update(whatsapp_opt_in=True,
+                            whatsapp_opt_in_at=datetime.datetime.now(datetime.timezone.utc).isoformat())
+        if without_login:
+            reg_data['registered_without_login'] = True   # its emails carry a cancel link (UPG-97)
+        record_consent(db, email, reg_data['privacy_consent'])
+        if team_max > 1:
+            reg_data['team_code'] = new_team_code(db)  # others join with it (UPG-08)
+
+        # Free vs paid fee calculation
+        # The ticket type's price (UPG-155), else the registrant's group fee (UPG-73)
+        from services_payments import registration_fee
+        fee = registration_fee(event_data, ptype, ticket_id, len(members))
+
+        # Capacity check — if event is at capacity, add to waitlists instead
+        max_cap = safe_int((event_data.get('limits') or {}).get('max_participants', 0)) or safe_int(event_data.get('capacity', 0))
+        current_count = safe_int(event_data.get('registration_count', 0))
+        from services_waitlist import joins_waitlist   # also while teams wait for the SPOC (UPG-243)
+        if not organiser and joins_waitlist(db, event_id, event_data, current_count, max_cap):
+            # Check if already on waitlists
+            wl_existing = list(
+                db.collection('waitlists')
+                  .where(filter=FieldFilter('event_id', '==', event_id))
+                  .where(filter=FieldFilter('email', '==', email))
+                  .where(filter=FieldFilter('status', '==', 'waiting'))
+                  .limit(1).stream()
+            )
+            if wl_existing:
+                flash("You are already on the waitlist for this event.", "info")
+                return redirect('/participant/dashboard')
+
+            # Count existing waitlist to get position
+            wl_count = 0
+            for _ in (
+                db.collection('waitlists')
+                  .where(filter=FieldFilter('event_id', '==', event_id))
+                  .where(filter=FieldFilter('status', '==', 'waiting'))
+                  .stream()
+            ):
+                wl_count += 1
+
+            wl_id = generate_reg_id('WL')
+            wl_entry = {
+                'id':            wl_id,
+                'event_id':      event_id,
+                'event_title':   event_data.get('title', ''),
+                'email':         email,
+                'user_email':    email,
+                'name':          full_name,
+                'phone':         phone,
+                'payment_status': 'Free' if not fee else 'Pending',
+                'amount_paid':   0,
+                'joined_at':     datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                'status':        'waiting',
+                'position':      wl_count + 1,
+                'reg_data':      reg_data,
+            }
+            create_registration(db, wl_id, wl_entry, collection='waitlists')
+
+            finish_submission(sub_key, 'waitlist')
+            if is_new_user:
+                _email_new_account(email, full_name,
+                                   reason=f"when you joined the waitlist for {event_data.get('title', 'an event')}")
+            from services_waitlist import place_in_line
+            place = place_in_line(db, event_id, email) or wl_count + 1   # join order (UPG-114)
+            flash(f"This event is full! You've joined the waitlist at position #{place}. We'll email you if a spot opens.", "info")
+            return redirect('/participant/dashboard' if session_email else f'/event/{event_id}')
+
+        # Free vs paid
+        if fee > 0:
+            reg_data.update({
+                'status':         'Pending Payment',
+                'payment_status': 'Pending',
+                'amount_paid':    0
+            })
+            session['pending_reg_data'] = reg_data
+            finish_submission(sub_key, 'pending_payment')
+            if is_new_user:
+                _email_new_account(email, full_name)
+            return redirect(f'/payment/checkout/{event_id}')
+
+        reg_data.update({
+            'status':         'Confirmed',
+            'payment_status': 'Free',
+            'amount_paid':    0
+        })
+        # A free ticket type's seat, taken at once (UPG-155)
+        if ticket is not None and not tt.take_seat(event_id, ticket):
+            from services_idempotency import release_submission
+            release_submission(sub_key)
+            if is_new_user:   # the account exists now; its link mustn't be lost
+                _email_new_account(email, full_name)
+            flash(f"{ticket['name']} sold out just now; please choose another ticket.", 'warning')
+            session['form_state'] = {'event_id': event_id, 'values': answers,
+                                     'errors': {'ticket_type': f"{ticket['name']} is sold out."}}
+            return redirect(form_url)
+        try:
+            create_registration(db, reg_id, reg_data)   # never over another (UPG-95)
+        except AlreadyRegistered:
+            if ticket is not None:
+                tt.give_back_seat(event_id, ticket['id'])
+            raise
+        # Paid registrations record this once payment completes (routes_payment)
+        record_form_submission(db, event_id, reg_id, email, full_name, answers)
+
+        # Issue digital ticket with signed HMAC-SHA256 QR token
+        try:
+            from services_ticket import TicketService
+            tier = (ticket['name'] if ticket is not None else '') \
+                or answers.get('ticket_tier') or answers.get('ticket_type') or 'General'
+            TicketService.issue_ticket(
+                db,
+                event_id=event_id,
+                registration_id=reg_id,
+                user_email=email,
+                lead_name=full_name,
+                ticket_type=tier,
+            )
+        except Exception as e:
+            logger.warning("Could not auto-issue ticket on registration: %s", e)
+
+        # Atomic increment — safe under concurrent registrations
+        try:
+            db.collection('events').document(event_id).update({
+                'registration_count': firestore.Increment(1)
+            })
+        except Exception:
+            try:
+                ev_cur = db.collection('events').document(event_id).get()
+                cur_cnt = int(ev_cur.to_dict().get('registration_count', 0) or 0) if (ev_cur and ev_cur.exists) else 0
+                db.collection('events').document(event_id).update({
+                    'registration_count': cur_cnt + 1
+                })
+            except Exception as e:
+                logger.warning("Could not increment registration_count: %s", e)
+
+        # One email, to the lead (UPG-152): a new account's set-password link
+        # carries the confirmation; anyone else gets the confirmation. The
+        # QR ticket follows 1 day before the event.
+        # A portal-mode hackathon's email also says: join the WhatsApp group,
+        # check the hackathon page (UPG-195)
+        import services_hackathon
+        instructions = services_hackathon.registration_instructions(event_data, event_id)
+        from services_event_contact import support_email   # "Questions? Write to ..." (UPG-242)
+        login_email = ''
+        if is_new_user:
+            login_email = _email_new_account(email, full_name, registration={
+                'event_title': event_data.get('title', ''), 'event_date': event_data.get('date', ''),
+                'venue': event_data.get('venue', ''), 'team_name': team_name if team_max > 1 else '',
+                'reg_id': reg_id, 'instructions': instructions,
+                'support_email': support_email(event_data)})
+        else:
+            send_registration_confirmed_email(
+                email, full_name, event_data.get('title', ''),
+                event_date=event_data.get('date', ''),
+                venue=event_data.get('venue', ''),
+                cancel_url=cancel_url_for(reg_data),
+                instructions=instructions,
+                support_email=support_email(event_data),
+            )
+        # Each team member the lead listed hears they were added (UPG-48),
+        # only when team members get emails (NOTIFY_TEAM_MEMBERS, UPG-152)
+        # and the event isn't portal-only (UPG-195)
+        # Each member also gets a link to confirm and set a password (UPG-207);
+        # with NOTIFY_TEAM_MEMBERS off (the default) it's their only email
+        import services_team_confirm
+        services_team_confirm.after_registration(db, reg_id, reg_data, event_data)
+        from services_recipients import notify_team_members
+        members_emailed = notify_team_members() and services_hackathon.email_allowed(event_data, 'team')
+        for m in (reg_data.get('members') or []) if members_emailed else []:
+            m_email = str((m or {}).get('email') or '').strip().lower()
+            if m_email and m_email != email:
+                send_registration_confirmed_email(
+                    m_email, m.get('name') or 'Participant', event_data.get('title', ''),
+                    event_date=event_data.get('date', ''), venue=event_data.get('venue', ''),
+                    added_by=full_name, team_name=team_name)
+        if phone and reg_data.get('whatsapp_opt_in'):
+            try:   # the template message, once per registration (UPG-147)
+                import services_whatsapp
+                from utils_email import _base_url
+                services_whatsapp.set_consent(db, phone, True, f'registration {reg_id}')
+                services_whatsapp.notify(db, 'registration_confirmed', phone, {
+                    'name': full_name, 'event': event_data.get('title', ''), 'date': event_data.get('date', ''),
+                    'ticket_link': f"{_base_url().rstrip('/')}/ticket/{reg_id}"}, key=reg_id)
+            except Exception:
+                pass
+
+        if organiser:   # straight into the list, even past the limit (UPG-244)
+            actor = (session.get('user_id') or '').strip().lower()
+            log_action(db, "REGISTRATION_ADDED_BY_ORGANISER",
+                       f"{actor} added {team_name or full_name} ({email}, {len(members)} people) "
+                       f"to event {event_id}: registration {reg_id}")
+            finish_submission(sub_key, reg_id)
+            who = team_name if team_max > 1 and team_name not in ('', 'Individual') else full_name
+            mailed = (login_email in ('', 'sent')) if is_new_user else True
+            flash(f"{who} is registered ({reg_id})."
+                  + (f" {email} was emailed" + (" a link to set their password." if is_new_user else ".")
+                     if mailed else f" The email to {email} couldn't be sent (or today's limit was reached).")
+                  + _seats_note(event_id), 'success')
+            return redirect(f'/coordinator/registrations/{event_id}')
+
+        log_action(db, "FORM_SUBMISSION",
+                   f"{email} registered for event {event_id} via form")
+
+        # Redirect to confirmation page — not the ticket (QR gated until day before)
+        session['reg_confirmed'] = {
+            'reg_id':      reg_id,
+            'event_title': event_data.get('title', ''),
+            'event_date':  event_data.get('date', ''),
+            'venue':       event_data.get('venue', ''),
+            'is_new_user': is_new_user,
+            'user_email':  email,
+            'login_email': login_email,   # 'sent', 'limit' or 'failed' for a new account (UPG-152)
+        }
+        finish_submission(sub_key, reg_id)
+        return redirect('/registration/confirmed')
+
+    except AlreadyRegistered:
+        # Another form for this person got there first (two tabs): the database
+        # keeps one active registration per person per event (UPG-115)
+        if sub_key:
+            from services_idempotency import release_submission
+            release_submission(sub_key)
+        if organiser:
+            flash("That person is already registered for this event; nothing was added.", "warning")
+            return redirect(form_url)
+        flash("You're already registered for this event.", "info")
+        return redirect('/participant/dashboard' if session.get('user_id') else f'/event/{event_id}')
+
+    except HTTPException:   # a 403 for adding by hand without the right (UPG-244)
+        raise
+
+    except Exception as exc:
+        if sub_key:
+            from services_idempotency import release_submission
+            release_submission(sub_key)
+        logger.error("Form submission error for event %s: %s", event_id, exc, exc_info=True)
+        flash(f"Submission failed: {exc}", "danger")
+        return redirect(form_url)
+
+
+# =========================================================
+# 5. VIEW RESPONSES
+# =========================================================
+@forms_bp.route('/responses/<event_id>')
+@login_required
+@role_required(BUILDER_ROLES)
+def view_responses(event_id):
+    event_doc = db.collection('events').document(event_id).get()
+    if not event_doc.exists:
+        flash("Event not found.", "danger")
+        return redirect('/coordinator/dashboard')
+
+    event       = event_doc.to_dict()
+    event['id'] = event_id
+    if not _allowed(event_id, event, 'manage_registrations'):
+        abort(403)
+    schema      = _get_form(event_id) or {'fields': []}
+
+    submissions = []
+    for doc in (db.collection('form_submissions')
+                  .where(filter=FieldFilter('event_id', '==', event_id)).stream()):
+        d           = doc.to_dict()
+        d['doc_id'] = doc.id
+        submissions.append(d)
+
+    submissions.sort(key=lambda x: str(x.get('submitted_at', '')), reverse=True)
+    from utils_pagination import paginate_items
+    page = paginate_items(submissions, search_fields=('name', 'email', 'reg_id'))
+
+    return render_template(
+        'coordinator/form_responses.html',
+        event=event, schema=schema, submissions=page.items, page=page, total=len(submissions),
+        can_edit_form=_allowed(event_id, event, 'edit_event'),   # the builder's own check (UPG-68)
+    )
+
+
+# =========================================================
+# 6. EXPORT CSV
+# =========================================================
+@forms_bp.route('/responses/export/<event_id>')
+@login_required
+def export_responses(event_id):
+    # export_data on the event, else 403 for every role (UPG-03)
+    event_doc = db.collection('events').document(event_id).get()
+    if not event_doc.exists:
+        abort(404)
+    event     = event_doc.to_dict() or {}
+    if not _allowed(event_id, event, 'export_data'):
+        abort(403)
+    schema    = _get_form(event_id) or {'fields': []}
+    fields    = schema.get('fields', [])
+
+    submissions = [doc.to_dict() for doc in
+                   db.collection('form_submissions')
+                     .where(filter=FieldFilter('event_id', '==', event_id)).stream()]
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    header = ['Submitted At', 'Name', 'Email']
+    header += [f.get('label', f['id']) for f in fields
+               if f['id'] not in ('full_name', 'name', 'email')
+               and f.get('type') not in ('heading', 'paragraph', 'divider')]
+
+    rows = []
+    for s in submissions:
+        answers = s.get('answers', {})
+        row     = [s.get('submitted_at', ''), s.get('name', ''), s.get('email', '')]
+        for f in fields:
+            if (f['id'] in ('full_name', 'name', 'email') or
+                    f.get('type') in ('heading', 'paragraph', 'divider')):
+                continue
+            val = answers.get(f['id'], '')
+            row.append(', '.join(val) if isinstance(val, list) else val)
+        rows.append(row)
+
+    import services_export
+    header, rows = services_export.pick_columns(header, rows)   # the columns ticked (UPG-325)
+    writer.writerow(header)
+    writer.writerows(rows)
+
+    title = event.get('title', 'Event').replace(' ', '_')
+    return Response(
+        output.getvalue(), mimetype='text/csv',
+        headers={'Content-Disposition': f'attachment; filename={title}_responses.csv'}
+    )
+
+
+# =========================================================
+# 7. SCHEMA JSON API  (used by form_builder.html JS)
+# =========================================================
+@forms_bp.route('/schema/<event_id>')
+def get_schema(event_id):
+    schema = _get_form(event_id)
+    if not schema:
+        event_doc = db.collection('events').document(event_id).get()
+        is_team   = event_doc.to_dict().get('is_team_event', False) if event_doc.exists else False
+        return jsonify(_simple_schema_fallback(is_team))
+    return jsonify(schema)
+
+
+# =========================================================
+# 8. AI FORM GENERATION  (Gemini + keyword fallback)
+# =========================================================
+SUPPORTED_FIELD_TYPES = {
+    'text', 'textarea', 'email', 'tel', 'number', 'date', 'url',
+    'select', 'radio', 'checkbox_group', 'checkbox',
+    'heading', 'paragraph', 'divider'
+}
+
+
+def _slug(label: str, used: set) -> str:
+    base = re.sub(r'[^a-z0-9]+', '_', (label or 'field').lower()).strip('_') or 'field'
+    fid, n = base, 2
+    while fid in used:
+        fid = f"{base}_{n}"
+        n += 1
+    used.add(fid)
+    return fid
+
+
+def _normalize_fields(raw_fields) -> list:
+    """Sanitise LLM/keyword output into valid form_builder schema fields."""
+    if not isinstance(raw_fields, list):
+        return []
+    used, clean = set(), []
+    for i, f in enumerate(raw_fields):
+        if not isinstance(f, dict):
+            continue
+        ftype = str(f.get('type', 'text')).lower().strip()
+        if ftype not in SUPPORTED_FIELD_TYPES:
+            ftype = 'text'
+        label = str(f.get('label') or f'Field {i+1}').strip()[:120]
+        fid   = str(f.get('id') or '').strip() or _slug(label, used)
+        if fid in used:
+            fid = _slug(label, used)
+        else:
+            used.add(fid)
+        opts = f.get('options') or []
+        if not isinstance(opts, list):
+            opts = []
+        opts = [str(o).strip()[:80] for o in opts if str(o).strip()]
+        clean.append({
+            'id':          fid,
+            'type':        ftype,
+            'label':       label,
+            'placeholder': str(f.get('placeholder') or '')[:120],
+            'required':    bool(f.get('required', False)),
+            'options':     opts,
+            'min':         f.get('min', ''),
+            'max':         f.get('max', ''),
+            'help_text':   str(f.get('help_text') or '')[:200],
+        })
+    return clean
+
+
+def _keyword_generate(description: str, is_team: bool = False) -> list:
+    """Dumb keyword matcher — always works, no API needed."""
+    text = (description or '').lower()
+    fields, used = [], set()
+
+    def add(label, ftype, **extra):
+        fid = _slug(label, used)
+        fields.append({
+            'id': fid, 'type': ftype, 'label': label,
+            'placeholder': extra.get('placeholder', ''),
+            'required':    extra.get('required', False),
+            'options':     extra.get('options', []),
+            'min': extra.get('min', ''), 'max': extra.get('max', ''),
+            'help_text': '',
+        })
+
+    # Always: name + email
+    add('Full Name',     'text',  placeholder='Enter your full name', required=True)
+    add('Email Address', 'email', placeholder='you@example.com',      required=True)
+
+    if re.search(r'\b(phone|mobile|whatsapp|contact|number)\b', text):
+        add('Phone Number', 'tel', placeholder='10-digit mobile', required=True)
+
+    if re.search(r'\b(usn|srn|roll|registration no|reg no|student id)\b', text):
+        add('USN / Roll Number', 'text', placeholder='e.g. 1SN21CS001', required=True)
+
+    if re.search(r'\b(college|institution|university|school)\b', text):
+        add('College / Institution', 'text', placeholder='Your college name', required=True)
+
+    if re.search(r'\b(branch|department|stream|course)\b', text):
+        add('Branch / Department', 'text', placeholder='e.g. CSE, ECE', required=False)
+
+    if re.search(r'\b(year|semester|sem)\b', text):
+        add('Year of Study', 'select',
+            options=['1st Year', '2nd Year', '3rd Year', '4th Year'], required=True)
+
+    if re.search(r'\bgender\b', text):
+        add('Gender', 'radio', options=['Male', 'Female', 'Prefer not to say'])
+
+    if re.search(r'\b(t[- ]?shirt|tshirt|tee|size)\b', text):
+        add('T-Shirt Size', 'select', options=['S', 'M', 'L', 'XL', 'XXL'])
+
+    if re.search(r'\b(diet|food|veg|meal)\b', text):
+        add('Dietary Preference', 'radio', options=['Veg', 'Non-Veg', 'Jain', 'Vegan'])
+
+    if re.search(r'\b(github|portfolio|link|url|website)\b', text):
+        add('GitHub / Portfolio URL', 'url', placeholder='https://github.com/you')
+
+    if re.search(r'\b(linkedin)\b', text):
+        add('LinkedIn Profile', 'url', placeholder='https://linkedin.com/in/you')
+
+    if re.search(r'\b(resume|cv)\b', text):
+        add('Resume / CV Link', 'url', placeholder='Google Drive or link')
+
+    if re.search(r'\b(abstract|pitch|idea|proposal|description)\b', text):
+        add('Project / Idea Description', 'textarea',
+            placeholder='Tell us about your idea (100–300 words)')
+
+    if re.search(r'\b(experience|skill)\b', text):
+        add('Relevant Skills / Experience', 'textarea',
+            placeholder='Languages, frameworks, past projects')
+
+    if re.search(r'\b(allerg|medical|health)\b', text):
+        add('Allergies / Medical Notes', 'textarea', placeholder='Leave blank if none')
+
+    if re.search(r'\b(emergency|guardian|parent)\b', text):
+        add('Emergency Contact Number', 'tel', placeholder='10-digit number')
+
+    if re.search(r'\b(dob|date of birth|birthday)\b', text):
+        add('Date of Birth', 'date')
+
+    if re.search(r'\b(accommodation|stay|hostel|outstation)\b', text):
+        add('Need Accommodation?', 'radio', options=['Yes', 'No'])
+
+    if re.search(r'\b(hear|source|how did you)\b', text):
+        add('How did you hear about this event?', 'select',
+            options=['Instagram', 'WhatsApp', 'College Notice', 'Friend', 'Other'])
+
+    if is_team or re.search(r'\b(team|group|squad)\b', text):
+        add('Team Name', 'text', placeholder='Your team name', required=True)
+        add('Team Size', 'number', placeholder='e.g. 4', min=1, max=10)
+
+    # De-dupe by label
+    seen, deduped = set(), []
+    for f in fields:
+        key = f['label'].lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(f)
+    return deduped
+
+
+def _gemini_generate(description: str, is_team: bool) -> list:
+    """Ask Gemini for a structured schema. Returns [] on any failure."""
+    api_key = current_app.config.get('GEMINI_API_KEY', '')
+    if not api_key:
+        return []
+    try:
+        from google import genai  # already in requirements
+        client = genai.Client(api_key=api_key)
+        prompt = (
+            "You are a form-schema generator for a college event registration system.\n"
+            "Given the SPOC's plain-English description, output ONLY a JSON array of "
+            "form fields (no prose, no markdown fences). Each field must match this shape:\n"
+            '{"id": "snake_case_id", "type": "<type>", "label": "Human label", '
+            '"placeholder": "", "required": true/false, "options": ["..."], '
+            '"min": "", "max": "", "help_text": ""}\n\n'
+            f"Allowed types: {', '.join(sorted(SUPPORTED_FIELD_TYPES))}.\n"
+            "Rules:\n"
+            "- Always include Full Name (text, required) and Email (email, required) "
+            "as the first two fields.\n"
+            "- Use 'select' or 'radio' whenever the description implies a fixed set of "
+            "choices (e.g. sizes, year, gender, veg/non-veg).\n"
+            "- Use 'tel' for phone/whatsapp, 'url' for links, 'textarea' for long answers, "
+            "'number' for counts.\n"
+            "- Mark a field required only if clearly essential.\n"
+            "- Keep it under 15 fields. Omit 'options' when not applicable.\n"
+            f"- Team event: {is_team}. If true, include Team Name.\n\n"
+            f"Description:\n{description}\n\n"
+            "Output: JSON array only."
+        )
+        resp = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt
+        )
+        raw = (resp.text or '').strip()
+        # strip markdown fences if the model added them anyway
+        raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw, flags=re.IGNORECASE).strip()
+        # trim to the outermost JSON array
+        first, last = raw.find('['), raw.rfind(']')
+        if first == -1 or last == -1 or last < first:
+            return []
+        parsed = json.loads(raw[first:last + 1])
+        return parsed if isinstance(parsed, list) else []
+    except Exception as exc:
+        current_app.logger.warning("Gemini form-gen failed: %s", exc)
+        return []
+
+
+@forms_bp.route('/ai_generate', methods=['POST'])
+@login_required
+@role_required(BUILDER_ROLES)
+def ai_generate():
+    """
+    Request:  { description: str, is_team: bool }
+    Response: { source: 'ai' | 'keyword', fields: [...] }
+    """
+    try:
+        payload     = request.get_json(force=True) or {}
+        description = str(payload.get('description', '')).strip()
+        is_team     = bool(payload.get('is_team', False))
+
+        if not description:
+            return jsonify({'status': 'error', 'message': 'Please describe your form.'}), 400
+
+        fields = _normalize_fields(_gemini_generate(description, is_team))
+        source = 'ai' if fields else 'keyword'
+        if not fields:
+            fields = _normalize_fields(_keyword_generate(description, is_team))
+
+        return jsonify({'status': 'ok', 'source': source, 'fields': fields})
+    except Exception as exc:
+        return jsonify({'status': 'error', 'message': str(exc)}), 500
+
+
+@forms_bp.route('/create', methods=['GET', 'POST'])
+@login_required
+@role_required(BUILDER_ROLES)
+def create_form():
+    if request.method == 'POST':
+        return ai_generate()
+    event_id = request.args.get('event_id')
+    if event_id:
+        return redirect(f'/forms/builder/{event_id}')
+    role = session.get('role')
+    if role == 'ClubSPOC':
+        return redirect('/spoc/dashboard')
+    return redirect('/coordinator/dashboard')
+
+
+# =========================================================
+# CANCEL BY EMAILED LINK (UPG-97)
+# =========================================================
+@forms_bp.route('/cancel/<token>', methods=['GET', 'POST'])
+def cancel_by_link(token):
+    """The 'Not you?' link emailed for a registration made without logging
+    in. Opening it only asks; the button cancels, once (so mail scanners that
+    open links cancel nothing)."""
+    reg_id, email, error = load_cancel_token(token)
+    doc = db.collection('registrations').document(reg_id).get() if not error else None
+    reg = (doc.to_dict() or {}) if doc is not None and doc.exists else {}
+    if (error or not reg or str(reg.get('lead_email') or '').lower() != email
+            or not reg.get('registered_without_login')):
+        return render_template('public/cancel_registration.html', state='invalid',
+                               expired=error == 'expired'), 400
+    event_doc = db.collection('events').document(str(reg.get('event_id', ''))).get()
+    title = ((event_doc.to_dict() or {}) if event_doc.exists else {}).get('title') or reg.get('event_title', '')
+    paid = str(reg.get('payment_status') or '').lower().startswith('paid')
+    if str(reg.get('status') or '').lower() == 'cancelled':
+        return render_template('public/cancel_registration.html', state='done', title=title, paid=paid)
+    if request.method == 'POST':
+        from routes_participant import cancel_registration_record
+        reason = "Cancelled from the emailed link: made without logging in"
+        if paid:
+            reason += "; the payment is to be refunded"
+        cancel_registration_record(reg_id, reg, f"{email} (emailed link)", reason)
+        return render_template('public/cancel_registration.html', state='done', title=title, paid=paid)
+    return render_template('public/cancel_registration.html', state='confirm', title=title, paid=paid,
+                           reg=reg, token=token)

@@ -1,0 +1,382 @@
+{% extends "layouts/fullscreen.html" %}
+{#- On the shared document since UPG-23e (full-screen: no footer). -#}
+{% block csrf_meta %}<meta name="csrf-token" content="{{ csrf_token() }}">{% endblock %}
+{% block head %}
+    <title>Scanner | {{ event_title }}</title>
+    {% include "layouts/_bootstrap_css.html" %}
+    <link href="/static/css/global.css" rel="stylesheet">
+    {% include "layouts/_fontawesome.html" %}
+    <script integrity="sha384-c9d8RFSL+u3exBOJ4Yp3HUJXS4znl9f+z66d1y54ig+ea249SpqR+w1wyvXz/lk+" crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <style>
+        /* Coordinator entry scanner (UPG-63): navy device screen, gold accents */
+        body { background-color: var(--brand-navy); color: white; font-family: var(--font-body); }
+        .scan-brand { height: 36px; width: auto; }
+        .scan-title { font-size: 1.5rem; font-weight: 700; color: var(--brand-gold); }
+        .scan-event { color: rgba(255,255,255,.82); font-size: 1.05rem; }
+        .scan-narrow { max-width: 500px; }
+        .scan-wide { max-width: 600px; }
+        .scan-locked { max-width: 480px; margin: auto; }
+        .scan-locked__icon { width: 72px; height: 72px; margin: 0 auto; border-radius: 50%; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.15); display: flex; align-items: center; justify-content: center; font-size: 28px; color: var(--brand-gold); }
+        .scan-locked h2 { color: #fff; font-size: 1.25rem; }
+        .attendance-card { border-top: 4px solid var(--brand-gold); }
+        .attendance-card #t_team { color: var(--brand-navy); }
+        .room-banner { background: var(--success-soft); border: 2px solid #86efac; border-radius: 10px; padding: 12px 16px; margin-bottom: 14px; text-align: center; }
+        .room-banner__label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: #15803d; margin-bottom: 4px; }
+        .room-banner__name { font-family: var(--font-mono, monospace); font-size: 28px; font-weight: 800; color: #14532d; }
+        .btn-cam-start:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+        #reader { width: 100%; min-height: 320px; border-radius: 15px; overflow: hidden; border: 4px solid #c69d67; background: #000; display: flex; align-items: center; justify-content: center; position: relative; }
+        #reader video { width: 100% !important; height: auto !important; display: block; }
+        #cam-placeholder { color: #c69d67; text-align: center; padding: 30px 16px; }
+        #cam-error { display:none; background:#7f1d1d; color:#fee2e2; padding:12px 16px; border-radius:10px; margin-top:14px; font-size:14px; text-align:center; }
+        .btn-cam-start { background:#c69d67; color:#00185e; border:none; border-radius:10px; padding:12px 28px; font-weight:700; font-size:15px; cursor:pointer; }
+        .btn-cam-start:hover { background:#e1b970; }
+        .member-row { background: white; color: #1e293b; padding: 15px; border-radius: 10px; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; border-left: 5px solid #10b981;}
+        .form-check-input { width: 25px; height: 25px; cursor: pointer; accent-color: #10b981; border: 2px solid #cbd5e1; }
+    </style>
+{% endblock %}
+{% block body_attrs %} class="d-flex flex-column align-items-center justify-content-center min-vh-100 p-3"{% endblock %}
+{% block body %}
+
+    <div class="text-center mb-4">
+        <img src="/static/img/snpsu-logo-reversed.png" alt="SNPSU" class="brand-logo scan-brand mb-3">
+        <h1 class="scan-title mb-1"><i class="fas fa-qrcode me-2" aria-hidden="true"></i>Entry scanner</h1>
+        <p class="scan-event mb-0">{{ event_title }}</p>
+    </div>
+
+    {% if not scanning_open %}
+    <div class="text-center px-3 py-5 scan-locked">
+      <div class="scan-locked__icon" aria-hidden="true"><i class="fas fa-lock"></i></div>
+      <h2 class="fw-bold mt-3">Scanner locked</h2>
+      {#- The event's days in India (UPG-378) -#}
+      <p class="text-white-50">
+        {% if checkin.key == 'before' %}Check-in opens on <strong class="text-white">{{ checkin.first }}</strong>. Come back on the event day.
+        {% else %}The event ended on <strong class="text-white">{{ checkin.last }}</strong>. To mark someone who came but wasn't scanned, ask the event's SPOC.{% endif %}
+      </p>
+      <a href="/coordinator/scanner" class="btn btn-outline-light mt-3"><i class="fas fa-arrow-left me-2"></i>Back</a>
+    </div>
+    {% else %}
+    <div id="scanner-view" class="w-100 scan-narrow">
+        {% if sessions %}
+        <!-- Session mode (UPG-159): scan people into one agenda session -->
+        <div class="mb-3">
+            <label for="scanMode" class="form-label small fw-bold">Scanning for</label>
+            <select id="scanMode" class="form-select" data-scan-mode>
+                <option value="">Event entry</option>
+                {% for s in sessions %}
+                <option value="{{ s.id }}">Session: {{ s.time }} {{ s.title }}{% if s.room %} ({{ s.room }}){% endif %}{% if s.capacity %} · {{ s.capacity }} seats{% endif %}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endif %}
+        <div id="reader" class="shadow-lg">
+            <div id="cam-placeholder">
+                <i class="fas fa-camera fa-2x mb-3" aria-hidden="true"></i>
+                <p class="mb-3 fw-bold">Tap below to start the camera</p>
+                <button class="btn-cam-start" data-h-click="coordinator/scan:1">
+                    <i class="fas fa-video me-2" aria-hidden="true"></i>Start camera
+                </button>
+            </div>
+        </div>
+        <div id="cam-error" role="alert"></div>
+        <div class="mt-4 text-center">
+            <p>Or paste the ticket link or code:</p>
+            <div class="input-group">
+                <input aria-label="Ticket link or code" type="text" id="manual_id" class="form-control form-control-lg" placeholder="Ticket link or code">
+                <button type="button" class="btn btn-gold px-4" data-h-click="coordinator/scan:2">Fetch</button>
+            </div>
+            <a href="/coordinator/scanner" class="btn btn-outline-light mt-4"><i class="fas fa-arrow-left me-2"></i>Back to scanner menu</a>
+        </div>
+    </div>
+    <div id="attendance-view" class="w-100 d-none scan-wide">
+        <div class="bg-white text-dark p-4 rounded-4 shadow-lg attendance-card">
+            <h2 class="h4 fw-bold mb-1" id="t_team">Team name</h2>
+            <p class="fw-bold mb-1" id="t_status"></p>
+            <a id="t_badge" class="btn btn-outline-primary btn-sm mb-2" target="_blank" rel="noopener" hidden>
+              <i class="fas fa-id-badge me-1" aria-hidden="true"></i>Print badge</a>
+            <p class="text-muted border-bottom pb-3 mb-3">Ticket ID: <span id="t_id" class="fw-bold"></span></p>
+
+            <!-- Room assignment banner -->
+            <div id="room-banner" class="room-banner" style="display:none;">
+              <div class="room-banner__label"><i class="fas fa-door-open me-1" aria-hidden="true"></i>Assigned room</div>
+              <div id="room-name" class="room-banner__name"></div>
+            </div>
+
+            <div class="alert alert-warning border-warning">
+                <i class="fas fa-exclamation-triangle me-2"></i> Only leave checkboxes checked for students physically present. <strong>Absent students will not receive certificates.</strong>
+            </div>
+            
+            <form id="attendanceForm">
+                <input type="hidden" id="submit_reg_id">
+                <div id="members-list"></div>
+                
+                <div class="d-flex justify-content-between mt-4 pt-3 border-top">
+                    <button type="button" class="btn btn-secondary px-4" data-h-click="coordinator/scan:3">Next scan</button>
+                    <button type="button" id="save-members" class="btn btn-success px-4 fw-bold" data-h-click="coordinator/scan:4">Save member attendance <i class="fas fa-check-circle ms-2" aria-hidden="true"></i></button>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% endif %}{# end scanning_open #}
+
+    <script nonce="{{ csp_nonce() }}">
+        let html5Qr = null;
+        let camRunning = false;
+        let audioCtx = null;
+
+        function playScanSound(type) {
+            try {
+                if (!audioCtx) {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                if (audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                }
+                
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                
+                const now = audioCtx.currentTime;
+                
+                if (type === 'success') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(587.33, now); // D5
+                    osc.frequency.setValueAtTime(880, now + 0.1); // A5
+                    gain.gain.setValueAtTime(0.15, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+                    osc.start(now);
+                    osc.stop(now + 0.35);
+                    
+                    if (navigator.vibrate) {
+                        navigator.vibrate([80, 50, 80]);
+                    }
+                } else if (type === 'warning' || type === 'already_in') {
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(440, now); // A4
+                    osc.frequency.setValueAtTime(349.23, now + 0.15); // F4
+                    gain.gain.setValueAtTime(0.2, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+                    osc.start(now);
+                    osc.stop(now + 0.4);
+                    
+                    if (navigator.vibrate) {
+                        navigator.vibrate(200);
+                    }
+                } else {
+                    // Low buzzer error
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(150, now);
+                    osc.frequency.linearRampToValueAtTime(100, now + 0.3);
+                    gain.gain.setValueAtTime(0.3, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+                    osc.start(now);
+                    osc.stop(now + 0.35);
+                    
+                    if (navigator.vibrate) {
+                        navigator.vibrate([300, 100, 300]);
+                    }
+                }
+            } catch (e) {
+                console.warn("Web Audio API blocked or not supported: ", e);
+            }
+        }
+
+        function showCamError(msg) {
+            const box = document.getElementById('cam-error');
+            box.innerText = msg;
+            box.style.display = 'block';
+        }
+        function hideCamError() {
+            document.getElementById('cam-error').style.display = 'none';
+        }
+
+        async function startCamera() {
+            hideCamError();
+            if (typeof Html5Qrcode === 'undefined') {
+                showCamError("Scanner library failed to load. Check your internet connection and refresh the page, or use manual Ticket ID entry below.");
+                return;
+            }
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                showCamError("Camera not supported on this browser. Use the manual Ticket ID entry below.");
+                return;
+            }
+            if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+                showCamError("Camera requires HTTPS. Access this page over a secure connection, or use manual entry.");
+                return;
+            }
+
+            const placeholder = document.getElementById('cam-placeholder');
+            if (placeholder) placeholder.style.display = 'none';
+
+            try {
+                html5Qr = new Html5Qrcode("reader");
+                await html5Qr.start(
+                    { facingMode: "environment" },
+                    { fps: 10, qrbox: { width: 250, height: 250 } },
+                    onScanSuccess,
+                    () => { /* ignore per-frame decode errors */ }
+                );
+                camRunning = true;
+            } catch (err) {
+                if (placeholder) placeholder.style.display = '';
+                const msg = (err && err.message) || String(err);
+                if (msg.toLowerCase().includes('permission') || msg.toLowerCase().includes('denied')) {
+                    showCamError("Camera permission was denied. Enable it in browser settings and tap Start Camera again.");
+                } else if (msg.toLowerCase().includes('notfound') || msg.toLowerCase().includes('no camera')) {
+                    showCamError("No camera found on this device.");
+                } else {
+                    showCamError("Could not start camera: " + msg);
+                }
+            }
+        }
+
+        async function pauseCamera() {
+            if (html5Qr && camRunning) {
+                try { await html5Qr.pause(true); } catch(_) {}
+            }
+        }
+        async function resumeCamera() {
+            if (html5Qr && camRunning) {
+                try { await html5Qr.resume(); } catch(_) {}
+            }
+        }
+
+        function onScanSuccess(decodedText) {
+            pauseCamera();
+            fetchTicket(decodedText);
+        }
+
+        // Auto-prompt camera start on page load (user may need to tap due to mobile autoplay rules)
+        document.addEventListener('DOMContentLoaded', function(){
+            // Only when the scanner is open: a locked event has no camera view (UPG-67)
+            if (!document.getElementById('cam-placeholder')) return;
+            // Attempt auto-start; browsers will prompt for permission on user gesture
+            startCamera();
+        });
+
+        const EVENT_ID = {{ event_id|tojson }};
+
+        // Every scan goes through the shared check-in (UPG-02): it marks the
+        // registration present, or says when it was first checked in.
+        async function fetchTicket(rawInput) {
+            if(!rawInput) return;
+            let data;
+            try {
+                // Session mode (UPG-159): the same ticket, recorded at the chosen session
+                const sessionId = document.getElementById('scanMode')?.value || '';
+                const post = (extra) => fetch(sessionId ? '/ticket/api/session_checkin' : '/ticket/api/checkin', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(Object.assign({ token: rawInput.trim(), event_id: EVENT_ID,
+                                                         session_id: sessionId, source: 'coordinator scanner' }, extra || {}))
+                });
+                data = await (await post()).json();
+                if (data.status === 'session_full' && confirm(data.message + '\n\nAdmit anyway?')) {
+                    data = await (await post({ allow_over: true })).json();
+                }
+            } catch (err) {
+                playScanSound('error');
+                alert("Network error. Try again.");
+                resumeCamera();
+                return;
+            }
+
+            if (data.status === 'success' || data.status === 'already_in') {
+                playScanSound(data.status);
+                document.getElementById('scanner-view').classList.add('d-none');
+                document.getElementById('attendance-view').classList.remove('d-none');
+
+                document.getElementById('t_team').innerText = (data.team && data.team !== 'Individual') ? data.team : data.name;
+                document.getElementById('t_status').innerText = data.session
+                    ? data.message
+                    : data.status === 'success'
+                    ? 'Checked in at ' + (data.checkin_time || '').slice(0, 5)
+                    : '' + data.message;
+                document.getElementById('t_id').innerText = data.reg_id;
+                const badge = document.getElementById('t_badge');   // UPG-158
+                if (data.badge_url) { badge.href = data.badge_url; badge.hidden = false; } else { badge.hidden = true; }
+                document.getElementById('submit_reg_id').value = data.reg_id;
+
+                // Show assigned room if available
+                const room = data.room || '';
+                const roomBanner = document.getElementById('room-banner');
+                if (room) {
+                    document.getElementById('room-name').innerText = room;
+                    roomBanner.style.display = '';
+                } else {
+                    roomBanner.style.display = 'none';
+                }
+
+                // Team members: untick anyone who isn't here, then save
+                const list = document.getElementById('members-list');
+                list.replaceChildren();
+                // Everyone on the team, the lead first, with or without a USN (UPG-318)
+                const members = data.members || [];
+                members.forEach(m => {
+                    const label = document.createElement('label');
+                    label.className = 'member-row shadow-sm';
+                    label.dataset.memberKey = m.key;
+                    const info = document.createElement('div');
+                    const strong = document.createElement('strong');
+                    strong.className = 'd-block';
+                    strong.textContent = m.name || 'No name given';
+                    if (m.lead) {
+                        const tag = document.createElement('span');
+                        tag.className = 'badge text-bg-primary ms-2';
+                        tag.textContent = 'Lead';
+                        strong.append(tag);
+                    }
+                    const small = document.createElement('small');
+                    small.className = 'text-muted';
+                    small.textContent = m.usn || 'No USN';
+                    info.append(strong, small);
+                    const box = document.createElement('input');
+                    box.type = 'checkbox';
+                    box.className = 'form-check-input';
+                    box.name = 'present_member';
+                    box.value = m.key;
+                    box.setAttribute('aria-label', (m.name || 'Member') + ' is here');
+                    box.checked = m.attendance !== 'Absent';
+                    label.append(info, box);
+                    list.appendChild(label);
+                });
+                document.getElementById('save-members').classList.toggle('d-none', members.length === 0);
+            } else {
+                playScanSound('error');
+                alert("" + data.message);
+                resumeCamera();
+            }
+        }
+
+        async function submitGranularAttendance() {
+            const checkboxes = document.querySelectorAll('input[name="present_member"]:checked');
+            const present = Array.from(checkboxes).map(cb => cb.value);   // each person's place (UPG-318)
+            const reg_id = document.getElementById('submit_reg_id').value;
+
+            const response = await fetch('/coordinator/mark_attendance_granular', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ reg_id: reg_id, present: present })
+            });
+            const data = await response.json();
+            
+            if(data.status === 'success') {
+                playScanSound('success');
+            } else {
+                playScanSound('error');
+            }
+            alert(data.message);
+            resetScanner();
+        }
+
+        function resetScanner() {
+            document.getElementById('attendance-view').classList.add('d-none');
+            document.getElementById('scanner-view').classList.remove('d-none');
+            document.getElementById('manual_id').value = '';
+            resumeCamera();
+        }
+    </script>
+<script src="/static/js/pages/coordinator__scan.js"></script>
+{% endblock %}
+{% block handler_scripts %}{{ super() }}<script src="/static/js/handlers/coordinator__scan.js"></script>{% endblock %}

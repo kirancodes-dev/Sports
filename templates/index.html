@@ -1,0 +1,930 @@
+{% extends "layouts/standalone.html" %}
+{#- On the shared document since UPG-23a. -#}
+{% block csrf_meta %}<meta name="csrf-token" content="{{ csrf_token() }}">{% endblock %}
+{% block head %}
+<meta name="theme-color" content="#00185e">
+
+<!-- ═══ SEO Meta Tags ═══ -->
+<title>SapthaEvent | Event Management Portal - Sapthagiri NPS University</title>
+<meta name="description" content="SapthaEvent: the official event portal of Sapthagiri NPS University, Bengaluru. Find hackathons, fests, sports meets and workshops, register online and get a QR ticket.">
+<meta name="keywords" content="events, registration, university, SNPSU, hackathon, cultural fest, sports meet, QR tickets, event portal">
+<meta name="author" content="Sapthagiri NPS University">
+<meta name="robots" content="index, follow">
+<meta name="language" content="English">
+
+<!-- ═══ Open Graph (Social Media) ═══ -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="SapthaEvent - Sapthagiri NPS University Event Portal">
+<meta property="og:description" content="Discover and register for campus events. Get instant QR tickets and event updates via email and WhatsApp.">
+<meta property="og:url" content="https://events.snpsu.edu.in">
+<meta property="og:image" content="/static/snpsu-logo.png">
+<meta property="og:site_name" content="SapthaEvent">
+
+<!-- ═══ Twitter Card ═══ -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="SapthaEvent - SNPSU Event Portal">
+<meta name="twitter:description" content="Register for campus events, get instant QR tickets, and receive alerts.">
+<meta name="twitter:image" content="/static/snpsu-logo.png">
+
+<!-- ═══ Canonical URL ═══ -->
+<link rel="canonical" href="https://events.snpsu.edu.in">
+
+<!-- ═══ Favicons ═══ -->
+<link rel="icon" type="image/png" href="/static/app-icon.png">
+<link rel="apple-touch-icon" href="/static/app-icon.png">
+
+{% include 'includes/pwa_head.html' %}
+
+<!-- ═══ Stylesheets ═══ -->
+{% include "layouts/_bootstrap_css.html" %}
+<link href="/static/css/global.css" rel="stylesheet">
+<link href="/static/css/event-details.css" rel="stylesheet">
+{% include "layouts/_fontawesome.html" %}
+<style>
+/* Home page (UPG-63): brand navy hero and footer, light content sections.
+   Shared components (.snav, .hero-*, .ev-card, .ftab, .step-card, .site-ft)
+   live in static/css/global.css; this block holds only the home page's own parts. */
+
+/* Sticky search + filter bar */
+.sticky-controls-wrapper {
+    position: sticky;
+    top: 62px;
+    z-index: 1010;
+    background: var(--surface-page);
+    padding: 12px 0;
+    border-bottom: 1px solid transparent;
+    transition: box-shadow var(--t-fast), border-color var(--t-fast);
+}
+.sticky-controls-wrapper.is-sticky { border-bottom-color: var(--border); box-shadow: var(--shadow-sm); }
+.btn-clear-search:hover { color: var(--brand-ink) !important; }
+
+/* Category tabs scroll sideways on small screens, with edge hints */
+.ftabs-scroll-container { position: relative; display: flex; align-items: center; width: 100%; }
+.ftabs-scroll-container::before, .ftabs-scroll-container::after {
+    content: ''; position: absolute; top: 0; bottom: 0; width: 32px;
+    pointer-events: none; z-index: 2; opacity: 0; transition: opacity var(--t-fast);
+}
+.ftabs-scroll-container::before { left: 0; background: linear-gradient(to right, var(--surface-page) 20%, transparent); }
+.ftabs-scroll-container::after { right: 0; background: linear-gradient(to left, var(--surface-page) 20%, transparent); }
+.ftabs-scroll-container.can-scroll-left::before, .ftabs-scroll-container.can-scroll-right::after { opacity: 1; }
+@media (min-width: 768px) { .ftabs { justify-content: flex-end; } }
+@media (max-width: 991.98px) {
+    .sticky-controls-wrapper { top: 58px; padding: 8px 0; }
+    .ftabs { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; width: 100%; }
+    .ftabs::-webkit-scrollbar { display: none; }
+    .ftab { flex: 0 0 auto; white-space: nowrap; }
+}
+
+/* Quick filters */
+.q-filter-pill {
+    background: var(--surface-card);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 4px 12px;
+    min-height: 32px;
+    border-radius: var(--radius-pill);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    display: inline-flex; align-items: center; gap: 4px;
+    cursor: pointer;
+}
+.q-filter-pill:hover { border-color: var(--brand-navy); color: var(--brand-ink); }
+.q-filter-pill.active { background: var(--brand-navy-50); border-color: var(--brand-navy); color: var(--brand-ink); }
+
+/* Event card states */
+.ev-reg-badge {
+    position: absolute; top: 12px; right: 12px; z-index: 3;
+    background: var(--success); color: #fff;
+    font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+    padding: 4px 10px; border-radius: var(--radius-pill);
+    display: inline-flex; align-items: center; gap: 4px;
+}
+.ev-deadline--closed { background: var(--danger) !important; }
+.ev-deadline--past { background: rgba(71, 85, 105, 0.9) !important; }
+.btn-reg.btn-reg-closed { background: var(--surface-muted) !important; color: var(--text-muted) !important; }
+.btn-reg[hidden], .ev-state-note[hidden], .live-status[hidden] { display: none !important; }
+    .ev-state-note { margin: 10px 0 0; font-size: 12.5px; color: var(--text-muted); line-height: 1.4; }
+.skeleton-card { background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 0 0 1rem; height: auto; overflow: hidden; }
+.skeleton-card .skeleton-image { height: 172px; border-radius: 0; margin-bottom: 1rem; }
+.skeleton-card .skeleton-title, .skeleton-card .skeleton-text, .skeleton-card .skeleton-btn { margin-left: 1rem; }
+
+/* Load more */
+.load-more-container { display: flex; justify-content: center; margin: 2rem 0 0.5rem; }
+
+/* Hero trust indicators */
+.hero-trust-badges li {
+    display: inline-flex; align-items: center; gap: 0.45rem;
+    font-size: var(--fs-xs); font-weight: 600;
+    color: rgba(255, 255, 255, 0.85);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: var(--radius-pill);
+    padding: 5px 12px;
+}
+.hero-trust-badges i { color: var(--brand-gold-300); }
+
+/* Campus gallery: two slow marquees, paused on hover, still for reduced motion */
+.photo-collage-section { padding: 64px 0 40px; background: var(--surface-card); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); overflow: hidden; }
+.marquee-outer { overflow: hidden; position: relative; margin-bottom: 12px; }
+.marquee-outer::before, .marquee-outer::after { content: ''; position: absolute; top: 0; bottom: 0; width: 96px; z-index: 2; pointer-events: none; }
+.marquee-outer::before { left: 0; background: linear-gradient(to right, var(--surface-card), transparent); }
+.marquee-outer::after { right: 0; background: linear-gradient(to left, var(--surface-card), transparent); }
+.marquee-track { display: flex; gap: 12px; width: max-content; will-change: transform; }
+@keyframes marquee-scroll-left { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@keyframes marquee-scroll-right { from { transform: translateX(-50%); } to { transform: translateX(0); } }
+.marquee-left { animation: marquee-scroll-left 45s linear infinite; }
+.marquee-right { animation: marquee-scroll-right 50s linear infinite; }
+.marquee-outer:hover .marquee-left, .marquee-outer:hover .marquee-right { animation-play-state: paused; }
+.marquee-img-wrap { flex-shrink: 0; width: 260px; height: 172px; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); background: var(--surface-muted); }
+.marquee-img-wrap.tall { width: 300px; height: 196px; }
+.marquee-img-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; }
+@media (max-width: 576px) {
+    .marquee-img-wrap { width: 180px; height: 124px; }
+    .marquee-img-wrap.tall { width: 200px; height: 140px; }
+}
+
+/* ── Home page with real university information (UPG-86) ── */
+/* Hero: the full campus photograph under brand navy */
+.hero-section {
+    background:
+        linear-gradient(105deg, rgba(0, 12, 54, 0.95) 0%, rgba(0, 24, 94, 0.86) 52%, rgba(0, 24, 94, 0.62) 100%),
+        url('/static/img/campus.webp') center 40% / cover no-repeat;
+}
+@media (max-width: 767.98px) {
+    .hero-section { background:
+        linear-gradient(180deg, rgba(0, 12, 54, 0.93) 0%, rgba(0, 24, 94, 0.9) 100%),
+        url('/static/img/campus-800.webp') center / cover no-repeat; }
+}
+.hero-title { font-size: clamp(2.1rem, 5vw, 3.4rem); }
+button.hsc-cat { font-family: inherit; line-height: 1.2; }
+.hero-next .hsc-cats { display: grid; grid-template-columns: repeat(4, auto); justify-content: start; }
+@media (max-width: 420px) { .hero-next .hsc-cats { grid-template-columns: repeat(2, 1fr); } .hero-next .hsc-cat { justify-content: center; } }
+.hsc-cat:focus-visible { outline: 2px solid var(--brand-gold-300); outline-offset: 2px; }
+
+/* "Coming up": the next events open for registration */
+/* Watch live (UPG-457): the first thing in the hero, on a phone too */
+.watch-live { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 auto 1.75rem; max-width: 760px;
+  padding: 12px 14px; border-radius: 14px; background: rgba(255, 255, 255, 0.08); border: 1.5px solid rgba(198, 157, 103, 0.7); color: #fff; }
+.watch-live__title { display: inline-flex; align-items: center; gap: 8px; font-weight: 800; font-size: 1rem; white-space: nowrap; }
+.watch-live__title .fa-tv { color: var(--brand-gold-300); }
+.watch-live__dot { width: 10px; height: 10px; border-radius: 50%; background: #ef4444; box-shadow: 0 0 0 0 rgba(239, 68, 68, .7); animation: watch-pulse 1.6s infinite; }
+@keyframes watch-pulse { 70% { box-shadow: 0 0 0 9px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
+@media (prefers-reduced-motion: reduce) { .watch-live__dot { animation: none; } }
+.watch-live__pick { flex: 1 1 140px; min-width: 0; min-height: 44px; border-radius: 10px; border: 0; padding: 0 12px; font-weight: 700; font-size: 1rem; color: #0d2d62; background: #fff; }
+.watch-live__one { flex: 1 1 auto; font-weight: 700; min-width: 0; overflow-wrap: anywhere; }
+.watch-live__go { min-height: 44px; border: 0; border-radius: 10px; padding: 0 16px; font-weight: 800; font-size: 1rem; color: #0d2d62; background: var(--brand-gold-300, #e0c48f); white-space: nowrap; }
+.watch-live__go:hover, .watch-live__go:focus-visible { background: #fff; }
+@media (max-width: 480px) { .watch-live__title { flex: 1 1 100%; } .watch-live__go { flex: 1 1 100%; } }
+.hero-next {
+    width: 100%; max-width: 440px; min-width: 0; overflow: hidden;
+    background: rgba(0, 10, 46, 0.62);
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    border: 1px solid rgba(255, 255, 255, 0.16); border-top: 3px solid var(--brand-gold);
+    border-radius: var(--radius-lg); padding: 1.35rem 1.25rem 1.25rem; box-shadow: var(--shadow-lg);
+}
+.hero-next__head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 0.85rem; flex-wrap: wrap; }
+.hero-next__title { font-family: var(--font-heading); font-size: 1.05rem; font-weight: 800; color: #fff; margin: 0; }
+.hero-next__title i { color: var(--brand-gold-300); margin-right: 4px; }
+.hero-next__count { font-size: var(--fs-xs); font-weight: 600; color: var(--text-on-brand-muted); }
+.hero-next__list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.hero-next__list > li { min-width: 0; }
+.hero-next__item {
+    display: flex; align-items: center; gap: 12px; padding: 10px 12px; min-width: 0; width: 100%;
+    border-radius: var(--radius); background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #fff; text-decoration: none; transition: background var(--t-fast), border-color var(--t-fast);
+}
+.hero-next__item:hover, .hero-next__item:focus-visible { background: rgba(255, 255, 255, 0.12); border-color: rgba(198, 157, 103, 0.6); color: #fff; }
+.hero-next__date {
+    flex: 0 0 48px; height: 52px; border-radius: 10px; background: var(--brand-gold); color: var(--brand-navy-900);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1;
+}
+.hero-next__date .d { font-family: var(--font-heading); font-size: 1.25rem; font-weight: 800; }
+.hero-next__date .m { font-size: 0.66rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px; }
+.hero-next__body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.hero-next__name { font-weight: 700; font-size: var(--fs-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hero-next__meta { font-size: var(--fs-xs); color: var(--text-on-brand-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hero-next__go { color: rgba(255, 255, 255, 0.5); font-size: 0.8rem; }
+.hero-next__empty { color: var(--text-on-brand-muted); font-size: var(--fs-sm); margin: 0; }
+
+/* About the university */
+.about-section { background: var(--surface-card); border-top: 1px solid var(--border); }
+.about-tagline { font-family: var(--font-heading); font-size: clamp(1.05rem, 2vw, 1.3rem); font-weight: 600; color: var(--brand-gold-700); }
+.about-sub { font-size: var(--fs-xs); font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); margin: 0 0 12px; }
+.school-card { background: var(--surface-page); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px; border-top: 3px solid var(--brand-navy); }
+.school-card__icon { width: 42px; height: 42px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; background: var(--brand-navy); color: var(--brand-gold-300); font-size: 1.1rem; margin-bottom: 12px; }
+.school-card__name { font-family: var(--font-heading); font-size: 1rem; font-weight: 800; color: var(--text-strong); margin: 0 0 10px; line-height: 1.3; }
+.school-card__list { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.school-card__list li { font-size: var(--fs-sm); color: var(--text); padding-left: 16px; position: relative; }
+.school-card__list li::before { content: ''; position: absolute; left: 0; top: 0.55em; width: 6px; height: 6px; border-radius: 50%; background: var(--brand-gold); }
+.fact-row { display: flex; gap: 12px; align-items: flex-start; height: 100%; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-page); }
+.fact-row__icon { flex: 0 0 36px; height: 36px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; background: var(--brand-gold-100); color: var(--brand-gold-700); }
+.fact-row__title { font-weight: 800; color: var(--text-strong); font-size: var(--fs-sm); }
+.fact-row__text { font-size: var(--fs-sm); color: var(--text-muted); line-height: 1.5; }
+.about-source { font-size: var(--fs-xs); color: var(--text-muted); margin: 18px 0 0; }
+
+/* Follow the university */
+.follow-section { background: var(--brand-navy); color: #fff; padding: clamp(48px, 6vw, 72px) 0; position: relative; overflow: hidden; }
+.follow-section::before { content: ''; position: absolute; inset: 0; background: radial-gradient(600px 300px at 10% 0%, rgba(198, 157, 103, 0.18), transparent 60%); pointer-events: none; }
+.follow-section .container-xl { position: relative; }
+.follow-eyebrow { color: var(--brand-gold-300); }
+.follow-h { font-family: var(--font-heading); font-size: clamp(1.5rem, 3vw, 2.1rem); font-weight: 800; color: #fff; margin: 0 0 0.5rem; }
+.follow-p { color: var(--text-on-brand-muted); }
+.follow-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.follow-card {
+    display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: var(--radius);
+    background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.14);
+    color: #fff; text-decoration: none; transition: transform var(--t-fast), background var(--t-fast), border-color var(--t-fast);
+}
+.follow-card:hover, .follow-card:focus-visible { background: rgba(255, 255, 255, 0.12); border-color: var(--brand-gold); color: #fff; transform: translateY(-2px); }
+.follow-card__icon { flex: 0 0 42px; height: 42px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; font-size: 1.15rem; color: #fff; }
+.follow-card--instagram .follow-card__icon { background: linear-gradient(45deg, #f58529, #dd2a7b 50%, #8134af); }
+.follow-card--youtube .follow-card__icon { background: #ff0000; }
+.follow-card--linkedin .follow-card__icon { background: #0a66c2; }
+.follow-card--facebook .follow-card__icon { background: #1877f2; }
+.follow-card--x .follow-card__icon { background: #000; border: 1px solid rgba(255, 255, 255, 0.3); }
+.follow-card__body { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.follow-card__name { font-weight: 800; font-size: var(--fs-sm); }
+.follow-card__handle { font-size: var(--fs-xs); color: var(--text-on-brand-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.follow-card__go { font-size: 0.75rem; opacity: 0.55; }
+@media (prefers-reduced-motion: reduce) { .follow-card:hover { transform: none; } }
+
+/* Footer */
+.ft-about { font-size: 13px; line-height: 1.72; margin-bottom: 16px; }
+.site-ft .ft-contact-row a { color: inherit; text-decoration: none; }
+.site-ft .ft-contact-row a:hover { text-decoration: underline; }
+
+/* Event detail modal becomes a bottom sheet on phones */
+@media (max-width: 576px) {
+    #eventModal .modal-dialog { margin: 0; position: fixed; bottom: 0; left: 0; right: 0; width: 100%; max-width: 100%; }
+    #eventModal .modal-content { border-radius: var(--radius-lg) var(--radius-lg) 0 0; max-height: 92vh; }
+    #eventModal .modal-content::before { content: ''; width: 40px; height: 4px; background: var(--border-strong); border-radius: 2px; margin: 10px auto 0; display: block; }
+}
+
+/* Voice search */
+.btn-voice-search { border-radius: 50%; width: 32px; height: 32px; min-height: 32px; display: flex; align-items: center; justify-content: center; }
+.btn-voice-search:hover { color: var(--brand-ink) !important; background: var(--brand-navy-50); }
+.btn-voice-search.listening { color: var(--danger) !important; background: var(--danger-soft); }
+</style>
+
+
+<!-- ═══ JSON-LD Structured Data for SEO ═══ -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  "name": "SapthaEvent",
+  "description": "Official event management portal and registration system for Sapthagiri NPS University",
+  "url": "https://events.snpsu.edu.in",
+  "applicationCategory": "BusinessApplication",
+  "creator": {
+    "@type": "Organization",
+    "name": "Sapthagiri NPS University",
+    "url": "https://snpsu.edu.in",
+    "logo": "/static/snpsu-logo.png"
+  },
+  "features": ["Event Registration", "QR Ticket Generation", "Email Alerts", "WhatsApp Notifications"],
+  "image": "/static/snpsu-logo.png"
+}
+</script>
+
+<!-- ═══ Organization Schema ═══ -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "name": "Sapthagiri NPS University",
+  "url": "https://snpsu.edu.in",
+  "logo": "/static/snpsu-logo.png",
+  "description": "A leading educational institution in Bengaluru, India",
+  "address": {
+    "@type": "PostalAddress",
+    "streetAddress": "#14/5, Chikkasandra",
+    "addressLocality": "Bengaluru",
+    "addressRegion": "Karnataka",
+    "postalCode": "560057",
+    "addressCountry": "IN"
+  },
+  "contactPoint": {
+    "@type": "ContactPoint",
+    "contactType": "Customer Service",
+    "telephone": "+91-80-2837-2800",
+    "email": "admissions@snpsu.edu.in"
+  },
+  "sameAs": {{ university.social | map(attribute='url') | list | tojson }}
+}
+</script>
+
+<script src="/static/js/escape.js"></script>
+{% endblock %}
+{% block body %}
+
+<!-- ═══ SKIP NAVIGATION LINK ═══ -->
+<a href="#main-content" class="skip-link">Skip to Main Content</a>
+
+<!-- NAVBAR -->
+<nav class="snav navbar navbar-expand-lg" role="navigation" aria-label="Main navigation">
+  <div class="container-xl px-3">
+    <a class="navbar-brand" href="/" aria-label="SapthaEvent Home">
+      <img loading="eager" src="/static/img/snpsu-logo-reversed.png"
+           alt="Sapthagiri NPS University" class="brand-logo" width="159" height="40"
+           data-h-error="index:1">
+      <div id="nav-logo-fallback" style="display:none;align-items:center;gap:10px;">
+        <div class="nav-logo-sq">SE</div>
+        <div>
+          <span class="brand-n">SapthaEvent</span>
+          <span class="brand-s">Sapthagiri NPS University</span>
+        </div>
+      </div>
+    </a>
+    <!-- Mobile: compact Login button, always visible -->
+    <div class="d-flex align-items-center gap-2 d-lg-none">
+      {% if session.get('user_id') %}
+        <a class="btn-login-mini" href="/logout" aria-label="Logout"><i class="fas fa-sign-out-alt"></i></a>
+      {% else %}
+        <a class="btn-login-mini" href="/login" aria-label="Login">
+          <i class="fas fa-sign-in-alt me-1"></i>Login
+        </a>
+      {% endif %}
+    </div>
+    <div class="collapse navbar-collapse" id="mainNav">
+      <ul class="navbar-nav ms-auto align-items-lg-center gap-lg-1 py-3 py-lg-0">
+        <li class="nav-item"><a class="nav-link" href="#events" data-i18n="nav_events">Events</a></li>
+        <li class="nav-item"><a class="nav-link" href="#about">About SNPSU</a></li>
+        {% if session.get('user_id') %}
+          {% set role = session.get('role','') %}
+          {% if role == 'Student' %}
+            <li class="nav-item"><a class="nav-link" href="/participant/dashboard"><i class="fas fa-ticket-alt me-1"></i><span data-i18n="nav_tickets">My Tickets</span></a></li>
+          {% elif role in ['SuperAdmin','Super Admin'] %}
+            <li class="nav-item"><a class="nav-link" href="/admin/dashboard"><i class="fas fa-tasks me-1"></i><span data-i18n="nav_dashboard">Dashboard</span></a></li>
+          {% elif role == 'ClubSPOC' %}
+            <li class="nav-item"><a class="nav-link" href="/spoc/dashboard"><i class="fas fa-tasks me-1"></i><span data-i18n="nav_dashboard">Dashboard</span></a></li>
+          {% elif role in ['EventCoordinator','Coordinator'] %}
+            <li class="nav-item"><a class="nav-link" href="/coordinator/dashboard"><i class="fas fa-tasks me-1"></i><span data-i18n="nav_dashboard">Dashboard</span></a></li>
+          {% elif role == 'Judge' %}
+            <li class="nav-item"><a class="nav-link" href="/judge/dashboard"><i class="fas fa-gavel me-1"></i>Judge Panel</a></li>
+          {% endif %}
+          <li class="nav-item ms-lg-2 d-none d-lg-block">
+            <a class="nav-link" href="/logout"><i class="fas fa-sign-out-alt me-1"></i><span data-i18n="nav_logout">Logout</span></a>
+          </li>
+        {% else %}
+          <li class="nav-item ms-lg-2 d-none d-lg-block">
+            <a class="nav-link btn-login" href="/login">
+              <i class="fas fa-sign-in-alt me-1"></i><span data-i18n="nav_login">Login</span>
+            </a>
+          </li>
+        {% endif %}
+
+        <li class="nav-item ms-lg-2">
+          {% include 'components/language_selector.html' %}
+        </li>
+      </ul>
+    </div>
+  </div>
+</nav>
+
+<!-- FLASH MESSAGES -->
+{% if get_flashed_messages() %}<div class="container-xl px-3 pt-3">{% include 'includes/flash_messages.html' %}</div>{% endif %}
+
+<!-- ═══ MAIN CONTENT ═══ -->
+<main id="main-content" role="main">
+
+<!-- ═══ HERO SECTION — Redesigned pure-CSS hero ═══ -->
+<section class="hero-section" id="hero" role="region" aria-label="Sapthagiri NPS University Event Portal Hero">
+  <div class="container-xl hero-container">
+    {#- Live scoring to watch, first thing on the page, a phone included (UPG-457) #}
+    {% if watch_live %}
+    <form class="watch-live" action="/tournament/watch" method="get" data-watch-live>
+      <span class="watch-live__title">{% if watch_live[0].live %}<span class="watch-live__dot" aria-hidden="true"></span> Live now{% else %}<i class="fas fa-tv" aria-hidden="true"></i> Live scoring{% endif %}</span>
+      {% if watch_live|length > 1 %}
+      <label class="visually-hidden" for="watch-live-pick">Choose what to watch</label>
+      <select class="watch-live__pick" id="watch-live-pick" name="event" data-watch-pick>
+        {% for w in watch_live %}<option value="{{ w.id }}" title="{{ w.title }}">{{ w.label }}{% if w.live %} · live{% endif %}</option>{% endfor %}
+      </select>
+      {% else %}
+      <input type="hidden" name="event" value="{{ watch_live[0].id }}">
+      <span class="watch-live__one">{{ watch_live[0].label }}</span>
+      {% endif %}
+      <button type="submit" class="watch-live__go"><i class="fas fa-play" aria-hidden="true"></i> Watch live scoring</button>
+    </form>
+    {% endif %}
+    <div class="row align-items-center g-5">
+      <!-- Left: what the portal is, for whom (UPG-86: no invented figures) -->
+      <div class="col-lg-7 text-center text-lg-start">
+        <div class="hero-branding">
+          <i class="fas fa-building-columns" aria-hidden="true"></i> {{ university.name }} · {{ university.city }}
+        </div>
+        <h1 class="hero-title">
+          Every campus event.<br>
+          <span class="accent">One place to join in.</span>
+        </h1>
+        <p class="hero-desc">
+          Hackathons, fests, sports meets, workshops and talks across the university. Find an event, register online and walk in with your QR ticket.
+        </p>
+        <div class="d-flex flex-wrap gap-3 justify-content-center justify-content-lg-start">
+          <a href="#events" class="btn btn-lg hero-btn-primary">
+            <i class="fas fa-calendar-alt me-2" aria-hidden="true"></i><span data-i18n="hero_cta_explore">Explore events</span>
+          </a>
+          <a href="#about" class="btn btn-lg hero-btn-outline">
+            <i class="fas fa-building-columns me-2" aria-hidden="true"></i>About SNPSU
+          </a>
+        </div>
+        <ul class="hero-trust-badges list-unstyled mt-4 mb-0 d-flex flex-wrap gap-2 justify-content-center justify-content-lg-start">
+          <li><i class="fas fa-building-columns" aria-hidden="true"></i> Official university portal</li>
+          <li><i class="fas fa-qrcode" aria-hidden="true"></i> QR ticket entry</li>
+          <li><i class="fas fa-envelope-open-text" aria-hidden="true"></i> Email &amp; WhatsApp updates</li>
+        </ul>
+      </div>
+
+      <!-- Right: the next events open for registration (from the database) -->
+      <div class="col-lg-5 d-flex justify-content-center justify-content-lg-end">
+        <section class="hero-next" aria-labelledby="hero-next-h">
+          <div class="hero-next__head">
+            <h2 class="hero-next__title" id="hero-next-h"><i class="fas fa-bolt" aria-hidden="true"></i> Coming up</h2>
+            {% if open_count %}<span class="hero-next__count">{{ open_count }} open for registration</span>{% elif coming_up %}<span class="hero-next__count">Registration not open yet</span>{% endif %}
+          </div>
+          {% if coming_up %}
+          <ul class="hero-next__list list-unstyled m-0">
+            {% for ev in coming_up %}
+            {%- set d = ev.get('date', '') -%}
+            <li>
+              <a class="hero-next__item" href="/event/{{ ev.id }}" data-open-event="{{ ev.id }}">
+                <span class="hero-next__date" aria-hidden="true">
+                  <span class="d">{{ d[8:10] if d|length >= 10 else '—' }}</span>
+                  <span class="m">{{ ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][(d[5:7]|int) - 1] if d|length >= 7 and d[5:7]|int else '' }}</span>
+                </span>
+                <span class="hero-next__body">
+                  <span class="hero-next__name">{{ ev.title }}</span>
+                  <span class="hero-next__meta">{{ ev.get('category', 'General') }}{% if ev.get('venue') %} · {{ ev.venue }}{% endif %}<span class="visually-hidden">, {{ d }}</span></span>
+                </span>
+                <i class="fas fa-chevron-right hero-next__go" aria-hidden="true"></i>
+              </a>
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          {#- "Check back soon" only when nothing is listed at all (UPG-266) -#}
+          <p class="hero-next__empty">{% if events %}Nothing new is coming up right now. The events below are closed or already over.{% else %}New events are published through the semester. Check back soon.{% endif %}</p>
+          {% endif %}
+          <div class="hsc-cats mt-3 mb-0" role="group" aria-label="Browse by category">
+            <button type="button" class="hsc-cat" data-h-click="index:2"><i class="fas fa-code" aria-hidden="true"></i> Technical</button>
+            <button type="button" class="hsc-cat" data-h-click="index:3"><i class="fas fa-music" aria-hidden="true"></i> Cultural</button>
+            <button type="button" class="hsc-cat" data-h-click="index:4"><i class="fas fa-running" aria-hidden="true"></i> Sports</button>
+            <button type="button" class="hsc-cat" data-h-click="index:5"><i class="fas fa-chart-bar" aria-hidden="true"></i> Management</button>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══ EVENTS ═══ -->
+<section id="events" class="py-5" role="region" aria-label="Upcoming events for registration">
+  <p class="live-status text-center small text-muted" data-live-status="stale-only" role="status" hidden></p>
+  <div class="container-xl px-3">
+
+    <!-- Heading Row -->
+    <div class="row mb-3">
+      <div class="col-12 text-center text-md-start">
+        <div class="sec-eyebrow">Open for Registration</div>
+        <h2 class="sec-h mb-1">Upcoming Events</h2>
+        <p class="sec-p mb-0">Register online and your QR ticket arrives by email.</p>
+      </div>
+    </div>
+
+    <!-- Controls Row (Search + Filter Tabs) -->
+    <div class="sticky-controls-wrapper">
+      <div class="container-xl px-0 px-md-3">
+        <div class="row align-items-center g-2 g-md-3 px-3 px-md-0">
+          <!-- Search input (Left/Top) -->
+          <div class="col-12 col-md-4">
+            <div class="search-box position-relative d-flex align-items-center">
+              <input aria-label="Search events" type="text" id="evSearch" class="form-control w-100" placeholder="Search events..." data-h-input="index:6" style="min-height:44px; padding-right:4.5rem;">
+              <i class="fas fa-search position-absolute top-50 translate-middle-y text-muted" style="left: 0.95rem;"></i>
+              
+              <div class="position-absolute top-50 end-0 translate-middle-y d-flex align-items-center" style="z-index: 11; margin-right: 6px;">
+                <button id="evVoiceSearch" class="btn btn-voice-search border-0 bg-transparent text-muted p-2" data-h-click="index:7" type="button" aria-label="Search by voice" style="display: none;">
+                  <i class="fas fa-microphone"></i>
+                </button>
+                <button id="evSearchClear" class="btn btn-clear-search d-none border-0 bg-transparent text-muted p-2" data-h-click="index:8" type="button" aria-label="Clear search">
+                  <i class="fas fa-times"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+          <!-- Category filters (Right/Bottom) -->
+          <div class="col-12 col-md-8 d-flex flex-column align-items-stretch align-items-md-end gap-2">
+            <div class="ftabs-scroll-container position-relative w-100">
+              <div class="ftabs" role="group" aria-label="Event category filters">
+                <button class="ftab active" data-h-click="index:9" aria-pressed="true">All Events</button>
+                <button class="ftab" data-h-click="index:10" aria-pressed="false"><i class="fas fa-code me-1" aria-hidden="true"></i>Technical</button>
+                <button class="ftab" data-h-click="index:11" aria-pressed="false"><i class="fas fa-music me-1" aria-hidden="true"></i>Cultural</button>
+                <button class="ftab" data-h-click="index:12" aria-pressed="false"><i class="fas fa-running me-1" aria-hidden="true"></i>Sports</button>
+                <button class="ftab" data-h-click="index:13" aria-pressed="false"><i class="fas fa-briefcase me-1" aria-hidden="true"></i>Management</button>
+              </div>
+            </div>
+            <!-- Quick Filters (Pills) -->
+            <div class="quick-filters-row d-flex flex-wrap gap-2 justify-content-start justify-content-md-end w-100 mt-1">
+              <button class="q-filter-pill" id="qfFree" data-h-click="index:14" aria-pressed="false" type="button">
+                <i class="fas fa-gift me-1"></i>Free Entry
+              </button>
+              <button class="q-filter-pill" id="qfTeam" data-h-click="index:15" aria-pressed="false" type="button">
+                <i class="fas fa-users me-1"></i>Team
+              </button>
+              <button class="q-filter-pill" id="qfIndividual" data-h-click="index:16" aria-pressed="false" type="button">
+                <i class="fas fa-user me-1"></i>Individual
+              </button>
+              <button class="q-filter-pill" id="qfSoon" data-h-click="index:17" aria-pressed="false" type="button">
+                <i class="fas fa-bolt me-1"></i>Happening Soon
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Grid -->
+    {% if events|length == 0 and no_firebase %}
+    <div class="alert alert-warning py-2 px-3 mb-3" style="font-size:13px;border-radius:10px;">
+      <i class="fas fa-plug me-2"></i>
+      <strong>Dev mode — Firebase not connected.</strong>
+      Add <code>serviceAccountKey.json</code> or set <code>FIREBASE_CREDENTIALS</code> to load real events.
+    </div>
+    {% endif %}
+    <!-- Skeleton Loading State (shown initially) -->
+    <div class="row g-4" id="evGridSkeleton" role="status" aria-live="polite" aria-label="Loading events">
+      {% for i in range(6) %}
+      <div class="col-12 col-sm-6 col-lg-4">
+        <div class="skeleton-card">
+          <div class="skeleton skeleton-image"></div>
+          <div class="skeleton skeleton-title"></div>
+          <div class="skeleton skeleton-text"></div>
+          <div class="skeleton skeleton-text" style="width:70%;"></div>
+          <div class="skeleton skeleton-btn"></div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="row g-4" id="evGrid" role="region" aria-label="Upcoming events" style="display:none;">
+      {% for event in events %}
+      <div class="col-12 col-sm-6 col-lg-4 ev-col scroll-animator" 
+           data-cat="{{ event.get('category','General')|lower }}" 
+           data-id="{{ event.id }}"
+           data-free="{{ 'true' if (not event.get('entry_fee') or event.entry_fee|int == 0) else 'false' }}"
+           data-team="{{ 'true' if event.get('is_team_event') else 'false' }}"
+           data-date="{{ event.get('date', '') }}"
+           data-registered="{% if registered_event_ids and event.id in registered_event_ids %}true{% else %}false{% endif %}"
+           data-reg-closed="{% if event.is_closed %}true{% else %}false{% endif %}"
+           data-reg-id="{{ registered_events_map.get(event.id, '') }}"
+           data-search="{{ event.title.lower() }} {{ event.get('description','').lower() }} {{ event.get('venue','').lower() }} {{ event.get('category','').lower() }}">
+        <div class="ev-card border-0 bg-transparent w-100 p-0 text-start d-flex flex-column h-100 ev-card-clickable" 
+             style="cursor: pointer;"
+             data-ev-id="{{ event.id }}"
+             {% if not (registered_event_ids and event.id in registered_event_ids) %}data-live-event="{{ event.id }}" data-reg-state="{{ event.reg_state.key }}"{% endif %}
+             role="button"
+             tabindex="0"
+             aria-label="Event: {{ event.title }}, {% if event.get('date') %}{{ event.date|day }}{% endif %}, Category: {{ event.get('category','General') }}">
+          <div class="ev-banner" aria-hidden="true">
+            {% if event.get('banner_url') %}
+              <img src="{{ event.banner_url }}" alt="" loading="lazy"
+                   data-h-error="index:18">
+              <div class="ev-overlay"></div>
+            {% endif %}
+            {% if registered_event_ids and event.id in registered_event_ids %}
+            <span class="ev-reg-badge">
+              <i class="fas fa-check-circle"></i> Registered
+            </span>
+            {% endif %}
+            {% set cat = event.get('category','General') %}
+            <i class="ev-banner-icon fas {{ {'Technical': 'fa-laptop-code', 'Cultural': 'fa-masks-theater', 'Sports': 'fa-futbol', 'Management': 'fa-chart-pie'}.get(cat, 'fa-star') }}"></i>
+            <span class="ev-cat cat-{{ cat|lower }}">{{ cat }}</span>
+            {#- One registration state for every page (UPG-266) -#}
+            {% set rs = event.reg_state %}
+            {% if rs.key == 'ended' %}
+            <span class="ev-deadline ev-deadline--past" data-reg-state="{{ rs.key }}"><i class="fas fa-history" aria-hidden="true"></i> <span data-live-label-on-change>{{ rs.label }}</span></span>
+            {% elif rs.key in ('closed', 'cancelled', 'full') %}
+            <span class="ev-deadline ev-deadline--closed" data-reg-state="{{ rs.key }}"><i class="fas fa-lock" aria-hidden="true"></i> <span data-live-label-on-change>{{ rs.label }}</span></span>
+            {% elif rs.key == 'not_open' %}
+            <span class="ev-deadline" data-reg-state="{{ rs.key }}"><i class="fas fa-hourglass-start" aria-hidden="true"></i> <span data-live-label-on-change>{% if rs.opens %}Opens {{ rs.opens }}{% else %}{{ rs.label }}{% endif %}</span></span>
+            {% elif rs.key == 'waitlist' %}
+            <span class="ev-deadline" data-reg-state="{{ rs.key }}"><i class="fas fa-user-clock" aria-hidden="true"></i> <span data-live-label-on-change>{{ rs.label }}</span></span>
+            {% elif rs.key == 'programme' %}
+            <span class="ev-deadline" data-reg-state="{{ rs.key }}"><i class="fas fa-list" aria-hidden="true"></i> <span data-live-label-on-change>{{ rs.label }}</span></span>
+            {% elif rs.deadline %}
+            <span class="ev-deadline" data-reg-state="{{ rs.key }}"><i class="fas fa-clock" aria-hidden="true"></i> <span data-live-label-on-change>Register by {{ rs.deadline }}</span></span>
+            {% endif %}
+          </div>
+          <div class="ev-body">
+            <h5 class="ev-title">{{ event.title }}</h5>
+            <p class="ev-desc">{{ event.get('description', 'An exciting event hosted by Sapthagiri NPS University. Click to register.') }}</p>
+            <div class="ev-meta">
+              {% if event.get('date') %}
+              <span data-info="date"><i class="fas fa-calendar-alt" aria-hidden="true"></i>{{ event.date|day }}</span>
+              {% endif %}
+              {% if event.get('venue') %}
+              <span data-info="venue"><i class="fas fa-map-marker-alt"></i>{{ event.venue }}</span>
+              {% endif %}
+              <span><i class="fas fa-users"></i>{{ 'Team' if event.get('is_team_event') else 'Individual' }}</span>
+            </div>
+            <div class="ev-footer">
+              <div>
+                {% if event.get('entry_fee') and event.entry_fee|int > 0 %}
+                  <div class="ev-fee-paid" data-info="fee">₹{{ event.entry_fee }}</div>
+                {% else %}
+                  <div class="ev-fee-free" data-info="fee">Free Entry</div>
+                {% endif %}
+              </div>
+              {% if registered_event_ids and event.id in registered_event_ids %}
+              <a href="/ticket/{{ registered_events_map.get(event.id, '') }}" class="btn-reg text-decoration-none" data-h-click="index:19">
+                <i class="fas fa-ticket-alt" aria-hidden="true"></i>Ticket
+              </a>
+              {% else %}
+              {#- Both are in the page; the live refresh shows the one that fits the state (UPG-267) -#}
+              <a {% if rs.action %}href="{{ rs.action_url }}"{% else %}hidden{% endif %} class="btn-reg text-decoration-none" data-h-click="index:21" data-live-action data-reg-action="{{ rs.action }}">
+                <i class="fas fa-arrow-right" aria-hidden="true"></i><span data-live-action-label>{{ rs.action_label }}</span>
+              </a>
+              <a href="/event/{{ event.id }}" class="btn-reg text-decoration-none btn-reg-closed" data-h-click="index:21" data-live-locked {% if rs.action %}hidden{% endif %}>
+                <i class="fas fa-circle-info" aria-hidden="true"></i>Details
+              </a>
+              {% endif %}
+            </div>
+            {% if not (registered_event_ids and event.id in registered_event_ids) %}
+            <p class="ev-state-note" data-reg-explanation data-live-explanation data-live-only-refused {% if rs.registerable %}hidden{% endif %}>{{ '' if rs.registerable else rs.explanation }}</p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      {% else %}
+      <div class="col-12">
+        <div class="no-events-box">
+          <i class="far fa-calendar-times"></i>
+          <h5 class="fw-bold text-secondary mb-2">No Events Currently Listed</h5>
+          <p class="text-muted mb-0" style="font-size:14px;">
+            New events are published throughout the semester. Check back soon or contact your Club SPOC.
+          </p>
+        </div>
+      </div>
+      {% endfor %}
+      
+      <!-- No search results fallback -->
+      <div class="col-12 text-center py-5 d-none" id="noSearchResults">
+        <div class="no-events-box mx-auto" style="max-width: 420px;">
+          <i class="fas fa-search-minus" aria-hidden="true"></i>
+          <h5 class="fw-bold text-secondary mb-2">No Matching Events</h5>
+          <p class="text-muted mb-0" style="font-size:14px; line-height: 1.6;">
+            We couldn't find any events matching your search criteria. Try selecting another category or typing another keyword.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    {#- The next 6 events, then every event on its own page: the home page stays short on a phone (UPG-297 (g)) -#}
+    {% if events %}
+    <div class="load-more-container" id="seeAllEvents">
+      <a href="/events" class="btn btn-outline-primary btn-load-more" data-see-all-events>
+        <span>See all events</span>
+        <i class="fas fa-arrow-right" aria-hidden="true"></i>
+      </a>
+    </div>
+    {% endif %}
+
+  </div>
+</section>
+
+<!-- ═══ PHOTO COLLAGE GALLERY ═══ -->
+<section class="photo-collage-section" id="campus-gallery" aria-label="Campus photo gallery" role="region">
+  <div class="container-xl px-3 mb-4">
+    <div class="text-center">
+      <div class="sec-eyebrow">Campus Life</div>
+      <h2 class="sec-h">Life at Sapthagiri NPS University</h2>
+      <p class="sec-p mx-auto" style="max-width:520px;">Photographs from the university's own gallery.</p>
+    </div>
+  </div>
+
+  <!-- Row 1: scrolls left -->
+  <div class="marquee-outer" aria-hidden="true">
+    <div class="marquee-track marquee-left">
+      <!-- Photos set 1 (duplicated for seamless loop) -->
+      <div class="marquee-img-wrap"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/2048928306_2026-04-29_11-07-47.webp" alt="Campus event" loading="lazy" data-h-error="index:23"></div>
+      <div class="marquee-img-wrap"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/845797912_2026-04-15_09-36-01.webp" alt="Campus event" loading="lazy" data-h-error="index:24"></div>
+      <div class="marquee-img-wrap"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/1526889240_2026-04-17_12-43-09.webp" alt="Campus event" loading="lazy" data-h-error="index:25"></div>
+      <div class="marquee-img-wrap"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/1103649422_2026-04-17_02-25-58.webp" alt="Campus event" loading="lazy" data-h-error="index:26"></div>
+      <div class="marquee-img-wrap"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/1103508763_2026-04-17_02-35-35.webp" alt="Campus event" loading="lazy" data-h-error="index:27"></div>
+      <div class="marquee-img-wrap"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/1926836658_2026-04-14_03-25-07.webp" alt="Campus event" loading="lazy" data-h-error="index:28"></div>
+      <div class="marquee-img-wrap"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/1624637338_2026-04-15_10-38-55.webp" alt="Campus event" loading="lazy" data-h-error="index:29"></div>
+      <div class="marquee-img-wrap"><img src="https://snpsu.edu.in/uploads/departments/banner/507099540_2026-04-14_05-45-28.webp" alt="Campus banner" loading="lazy" data-h-error="index:30"></div>
+      <!-- Duplicate for seamless loop -->
+      <div class="marquee-img-wrap"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/2048928306_2026-04-29_11-07-47.webp" alt="Campus event" loading="lazy" data-h-error="index:31"></div>
+      <div class="marquee-img-wrap"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/845797912_2026-04-15_09-36-01.webp" alt="Campus event" loading="lazy" data-h-error="index:32"></div>
+      <div class="marquee-img-wrap"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/1526889240_2026-04-17_12-43-09.webp" alt="Campus event" loading="lazy" data-h-error="index:33"></div>
+      <div class="marquee-img-wrap"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/1103649422_2026-04-17_02-25-58.webp" alt="Campus event" loading="lazy" data-h-error="index:34"></div>
+      <div class="marquee-img-wrap"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/1103508763_2026-04-17_02-35-35.webp" alt="Campus event" loading="lazy" data-h-error="index:35"></div>
+      <div class="marquee-img-wrap"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/1926836658_2026-04-14_03-25-07.webp" alt="Campus event" loading="lazy" data-h-error="index:36"></div>
+      <div class="marquee-img-wrap"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/1624637338_2026-04-15_10-38-55.webp" alt="Campus event" loading="lazy" data-h-error="index:37"></div>
+      <div class="marquee-img-wrap"><img src="https://snpsu.edu.in/uploads/departments/banner/507099540_2026-04-14_05-45-28.webp" alt="Campus banner" loading="lazy" data-h-error="index:38"></div>
+    </div>
+  </div>
+
+  <!-- Row 2: scrolls right -->
+  <div class="marquee-outer" aria-hidden="true">
+    <div class="marquee-track marquee-right">
+      <div class="marquee-img-wrap tall"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/598302472_2026-04-15_09-12-35.webp" alt="Campus event" loading="lazy" data-h-error="index:39"></div>
+      <div class="marquee-img-wrap tall"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/1466339825_2026-04-15_05-47-24.webp" alt="Campus event" loading="lazy" data-h-error="index:40"></div>
+      <div class="marquee-img-wrap tall"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/1323184756_2026-04-15_05-29-48.webp" alt="Campus event" loading="lazy" data-h-error="index:41"></div>
+      <div class="marquee-img-wrap tall"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/671174912_2026-04-15_05-03-39.webp" alt="Campus event" loading="lazy" data-h-error="index:42"></div>
+      <div class="marquee-img-wrap tall"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/845797912_2026-04-15_09-36-01.webp" alt="Campus event" loading="lazy" data-h-error="index:43"></div>
+      <div class="marquee-img-wrap tall"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/1526889240_2026-04-17_12-43-09.webp" alt="Campus event" loading="lazy" data-h-error="index:44"></div>
+      <div class="marquee-img-wrap tall"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/2048928306_2026-04-29_11-07-47.webp" alt="Campus event" loading="lazy" data-h-error="index:45"></div>
+      <div class="marquee-img-wrap tall"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/1926836658_2026-04-14_03-25-07.webp" alt="Campus event" loading="lazy" data-h-error="index:46"></div>
+      <!-- Duplicate -->
+      <div class="marquee-img-wrap tall"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/598302472_2026-04-15_09-12-35.webp" alt="Campus event" loading="lazy" data-h-error="index:47"></div>
+      <div class="marquee-img-wrap tall"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/1466339825_2026-04-15_05-47-24.webp" alt="Campus event" loading="lazy" data-h-error="index:48"></div>
+      <div class="marquee-img-wrap tall"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/1323184756_2026-04-15_05-29-48.webp" alt="Campus event" loading="lazy" data-h-error="index:49"></div>
+      <div class="marquee-img-wrap tall"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/671174912_2026-04-15_05-03-39.webp" alt="Campus event" loading="lazy" data-h-error="index:50"></div>
+      <div class="marquee-img-wrap tall"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/845797912_2026-04-15_09-36-01.webp" alt="Campus event" loading="lazy" data-h-error="index:51"></div>
+      <div class="marquee-img-wrap tall"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/1526889240_2026-04-17_12-43-09.webp" alt="Campus event" loading="lazy" data-h-error="index:52"></div>
+      <div class="marquee-img-wrap tall"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/2048928306_2026-04-29_11-07-47.webp" alt="Campus event" loading="lazy" data-h-error="index:53"></div>
+      <div class="marquee-img-wrap tall"><img src="https://snpsu.edu.in/uploads/photogallery/thumb/1926836658_2026-04-14_03-25-07.webp" alt="Campus event" loading="lazy" data-h-error="index:54"></div>
+    </div>
+  </div>
+
+  <div class="gallery-cta d-flex flex-wrap justify-content-center gap-2 mt-4">
+    <a href="https://snpsu.edu.in/gallery-category" target="_blank" rel="noopener" class="btn btn-outline-primary btn-sm">
+      <i class="fas fa-images me-2" aria-hidden="true"></i>University photo gallery
+    </a>
+    <a href="{{ university.social[0].url }}" target="_blank" rel="noopener" class="btn btn-outline-primary btn-sm">
+      <i class="fab fa-instagram me-2" aria-hidden="true"></i>More on Instagram
+    </a>
+  </div>
+</section>
+
+<!-- ═══ ABOUT THE UNIVERSITY (UPG-86: facts from snpsu.edu.in, kept in university_info.py) ═══ -->
+<section class="about-section section-block" id="about" aria-labelledby="about-h">
+  <div class="container-xl px-3">
+    <div class="row g-4 align-items-end mb-4">
+      <div class="col-lg-7">
+        <div class="sec-eyebrow">About the university</div>
+        <h2 class="sec-h" id="about-h">{{ university.name }}</h2>
+        <p class="about-tagline mb-0">“{{ university.tagline }}”</p>
+      </div>
+      <div class="col-lg-5 d-flex flex-wrap gap-2 justify-content-lg-end">
+        <a href="{{ university.links[0].url }}" target="_blank" rel="noopener" class="btn btn-gold"><i class="fas fa-graduation-cap me-2" aria-hidden="true"></i>{{ university.links[0].label }}</a>
+        <a href="{{ university.links[2].url }}" target="_blank" rel="noopener" class="btn btn-outline-primary"><i class="fas fa-file-lines me-2" aria-hidden="true"></i>Brochure</a>
+      </div>
+    </div>
+
+    <h3 class="about-sub">Schools and programmes</h3>
+    <div class="row g-3 mb-4">
+      {% for school in university.schools %}
+      <div class="col-12 col-sm-6 col-xl-3">
+        <article class="school-card h-100">
+          <span class="school-card__icon" aria-hidden="true"><i class="fas {{ school.icon }}"></i></span>
+          <h4 class="school-card__name">{{ school.name }}</h4>
+          <ul class="school-card__list">
+            {% for p in school.programmes %}<li>{{ p }}</li>{% endfor %}
+          </ul>
+        </article>
+      </div>
+      {% endfor %}
+    </div>
+
+    <h3 class="about-sub">At the university</h3>
+    <div class="row g-3">
+      {% for h in university.highlights %}
+      <div class="col-12 col-sm-6 col-lg-4">
+        <div class="fact-row">
+          <span class="fact-row__icon" aria-hidden="true"><i class="fas {{ h.icon }}"></i></span>
+          <div><div class="fact-row__title">{{ h.title }}</div><div class="fact-row__text">{{ h.text }}</div></div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <p class="about-source">From the university's website, <a href="{{ university_source }}" target="_blank" rel="noopener">snpsu.edu.in</a>.</p>
+  </div>
+</section>
+
+<!-- ═══ FOLLOW THE UNIVERSITY ═══ -->
+<section class="follow-section" id="follow" aria-labelledby="follow-h">
+  <div class="container-xl px-3">
+    <div class="row g-4 align-items-center">
+      <div class="col-lg-4 text-center text-lg-start">
+        <div class="sec-eyebrow follow-eyebrow">Stay in the loop</div>
+        <h2 class="follow-h" id="follow-h">Follow {{ university.short }}</h2>
+        <p class="follow-p mb-0">Fest photos, results and campus news on the university's official accounts.</p>
+      </div>
+      <div class="col-lg-8">
+        <ul class="follow-grid list-unstyled m-0">
+          {% for sm in university.social %}
+          <li>
+            <a class="follow-card follow-card--{{ sm.name|lower }}" href="{{ sm.url }}" target="_blank" rel="noopener">
+              <span class="follow-card__icon" aria-hidden="true"><i class="fab {{ sm.icon }}"></i></span>
+              <span class="follow-card__body"><span class="follow-card__name">{{ sm.name }}</span><span class="follow-card__handle">{{ sm.handle }}</span></span>
+              <i class="fas fa-arrow-up-right-from-square follow-card__go" aria-hidden="true"></i>
+              <span class="visually-hidden">(opens in a new tab)</span>
+            </a>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+<footer class="site-ft pt-5 pb-0" role="contentinfo">
+  <div class="container-xl px-3">
+    <div class="row g-4 pb-5">
+
+      <div class="col-12 col-md-6 col-lg-4">
+        <div class="d-flex align-items-center gap-2 mb-3">
+          <img loading="lazy" src="/static/img/snpsu-logo-reversed.png" alt="{{ university.name }}" class="brand-logo" width="151" height="38">
+          <span class="ft-brand">SapthaEvent</span>
+        </div>
+        <p class="ft-about">The official event portal of {{ university.name }}, {{ university.city }}: hackathons, fests, sports meets, workshops and talks.</p>
+        <ul class="d-flex flex-wrap gap-2 align-items-center list-unstyled m-0">
+          <li><a href="{{ university.website }}" target="_blank" rel="noopener" class="soc-btn" aria-label="{{ university.name }} website"><i class="fas fa-globe" aria-hidden="true"></i></a></li>
+          {% for sm in university.social %}
+          <li><a href="{{ sm.url }}" target="_blank" rel="noopener" class="soc-btn" aria-label="{{ university.short }} on {{ sm.name }}"><i class="fab {{ sm.icon }}" aria-hidden="true"></i></a></li>
+          {% endfor %}
+        </ul>
+      </div>
+
+      <div class="col-6 col-md-3 col-lg-2">
+        <div class="ft-heading">Portal</div>
+        <a href="#events" class="ft-lnk">Browse events</a>
+        <a href="/verify" class="ft-lnk">Verify a certificate</a>
+        <a href="/about" class="ft-lnk">About this portal</a>
+        {% if session.get('user_id') %}
+        <a href="/dashboard" class="ft-lnk">My dashboard</a>
+        <a href="/logout" class="ft-lnk">Log out</a>
+        {% else %}
+        <a href="/login" class="ft-lnk">Log in</a>
+        {% endif %}
+      </div>
+
+      <div class="col-6 col-md-3 col-lg-3">
+        <div class="ft-heading">University</div>
+        {% for l in university.links %}
+        <a href="{{ l.url }}" target="_blank" rel="noopener" class="ft-lnk">{{ l.label }}</a>
+        {% endfor %}
+      </div>
+
+      <div class="col-12 col-lg-3">
+        <div class="ft-heading">Contact</div>
+        <div class="ft-contact-row"><i class="fas fa-map-marker-alt" aria-hidden="true"></i><span>{{ university.address }}</span></div>
+        <div class="ft-contact-row"><i class="fas fa-phone" aria-hidden="true"></i><span>{% for label, tel in university.phones %}<a href="{{ tel }}">{{ label }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</span></div>
+        <div class="ft-contact-row"><i class="fas fa-envelope" aria-hidden="true"></i><a href="mailto:{{ university.email }}">{{ university.email }}</a></div>
+        <div class="ft-contact-row"><i class="fab fa-whatsapp" aria-hidden="true"></i><a href="{{ university.whatsapp }}" target="_blank" rel="noopener">Chat on WhatsApp</a></div>
+      </div>
+
+    </div>
+    <hr class="ft-divider">
+    <div class="ft-bottom d-flex flex-wrap justify-content-between align-items-center py-3 gap-2">
+      <span>© {{ current_date[:4] }} {{ university.name }}. All rights reserved.</span>
+      <span>
+        <a href="/privacy">Privacy policy</a>
+        &nbsp;·&nbsp;
+        <a href="/terms">Terms of service</a>
+        &nbsp;·&nbsp;
+        <a href="/compliance/settings">DPDP rights</a>
+      </span>
+    </div>
+  </div>
+</footer>
+
+{# The "Sparky" AI chat widget is off the home page (UPG-205, owner 2026-11-06) #}
+
+<!-- Bootstrap JS -->
+{% include "layouts/_bootstrap_js.html" %}
+<script src="/static/js/live-refresh.js"></script>
+<script src="/static/js/pages/index.js"></script>
+<script src="/static/js/pages/index__2.js"></script>
+
+<!-- ═══ EVENT DETAIL MODAL ═══ -->
+<div class="modal fade" id="eventModal" tabindex="-1" aria-labelledby="eventModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-xl">
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="eventModalLabel" aria-describedby="eventModalBody">
+      <div class="modal-header">
+        <h5 class="modal-title" id="eventModalLabel">Event Details</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close dialog"></button>
+      </div>
+      <div class="modal-body" id="eventModalBody">
+        <div class="spinner-border text-primary" role="status">
+          <span class="visually-hidden">Loading event details...</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Mobile bottom navigation -->
+{% include 'components/mobile_nav.html' %}
+
+<!-- PWA and Internationalization Scripts -->
+<script src="/static/js/pwa.js"></script>
+<script src="/static/js/i18n.js"></script>
+{% endblock %}
+{# The home page draws its own full footer (UPG-86) #}
+{% block site_footer %}{% endblock %}
+{% block handler_scripts %}{{ super() }}<script src="/static/js/handlers/index.js"></script>{% endblock %}

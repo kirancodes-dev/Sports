@@ -1,0 +1,63 @@
+{% extends "base_classic.html" %}
+{#- On the app layout and portal design system (UPG-63). -#}
+{% set app_active = 'scanner' %}
+{% block title %}Walk-in helpdesk | SapthaEvent{% endblock %}
+{% block page_title %}Walk-in helpdesk{% endblock %}
+{% block page_sub %}Register a walk-in, record the payment and email the ticket.{% endblock %}
+{% block page_actions %}<a href="/coordinator/scanner" class="btn btn-secondary"><i class="fas fa-arrow-left" aria-hidden="true"></i> Exit helpdesk</a>{% endblock %}
+{% block extra_css %}
+<style>
+/* Walk-in helpdesk (UPG-63) */
+.pos-card { max-width: 720px; border-top: 3px solid var(--brand-gold); }
+.pos-step { font-family: var(--font-heading); font-weight: 700; color: var(--text-strong); width: 100%; display: flex; align-items: center; gap: 10px; font-size: 1rem; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.pos-step__num { width: 26px; height: 26px; border-radius: 50%; background: var(--brand-navy); color: #fff; font-size: var(--fs-sm); font-weight: 700; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.payment-radio { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.payment-label { display: block; border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 16px; text-align: center; cursor: pointer; font-weight: 600; color: var(--text-muted); background: var(--surface-card); }
+.payment-label i { color: var(--text-subtle); }
+.payment-radio:checked + .payment-label { border-color: var(--brand-navy); box-shadow: inset 0 0 0 1px var(--brand-navy); background: var(--brand-navy-50); color: var(--brand-ink); }
+.payment-radio:checked + .payment-label i { color: var(--brand-gold-700); }
+.payment-radio:focus-visible + .payment-label { box-shadow: var(--focus-ring); }
+</style>
+{% endblock %}
+{% block content %}
+<div class="panel pos-card mx-auto">
+  <form action="/coordinator/process_walkin" method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <h2 class="pos-step"><span class="pos-step__num">1</span> Select event</h2>
+    <div class="mb-4">
+      <label class="form-label visually-hidden" for="pos-event">Event</label>
+      <select id="pos-event" name="event_id" class="form-select form-select-lg" required>
+        <option value="" disabled selected>Choose an event</option>
+        {% for event in events %}
+          <option value="{{ event.id }}">{{ event.title }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <h2 class="pos-step"><span class="pos-step__num">2</span> Student details</h2>
+    <div class="row g-3 mb-4">
+      <div class="col-md-6"><label class="form-label" for="pos-name">Full name</label><input id="pos-name" type="text" name="name" class="form-control" autocomplete="off" required></div>
+      <div class="col-md-6"><label class="form-label" for="pos-usn">College USN / ID</label><input id="pos-usn" type="text" name="usn" class="form-control" placeholder="e.g. 1XY23CS001" autocomplete="off" required></div>
+      <div class="col-md-6"><label class="form-label" for="pos-email">Email address (for the ticket)</label><input id="pos-email" type="email" name="email" class="form-control" autocomplete="off" required></div>
+      <div class="col-md-6"><label class="form-label" for="pos-phone">Phone number</label><input id="pos-phone" type="tel" name="phone" class="form-control" placeholder="10-digit number" autocomplete="off" required></div>
+    </div>
+
+    <fieldset class="mb-4">
+      <legend class="pos-step"><span class="pos-step__num">3</span> Payment collected</legend>
+      <div class="row g-3">
+        <div class="col-6">
+          <input type="radio" name="payment_mode" id="pay_cash" value="Cash" class="payment-radio" required>
+          <label for="pay_cash" class="payment-label"><i class="fas fa-money-bill-wave fa-2x mb-2 d-block" aria-hidden="true"></i> Cash received</label>
+        </div>
+        <div class="col-6">
+          <input type="radio" name="payment_mode" id="pay_upi" value="UPI" class="payment-radio" required>
+          <label for="pay_upi" class="payment-label"><i class="fas fa-qrcode fa-2x mb-2 d-block" aria-hidden="true"></i> UPI verified</label>
+        </div>
+      </div>
+    </fieldset>
+
+    <button type="submit" class="btn btn-gold btn-lg w-100">Confirm &amp; generate ticket <i class="fas fa-check-circle ms-1" aria-hidden="true"></i></button>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,547 @@
+"""
+routes_judge.py  —  Judge Panel
+================================
+Fixes in this version
+  - All .where() → filter=FieldFilter()   (no more UserWarning)
+  - Open Hall Mode: when event.open_hall_mode is True, judge sees ALL
+    present teams regardless of assigned_judge_email
+  - Score key uses email as-is (dict key), not a sanitised version
+  - /judge/leaderboard/<event_id>  — live JSON feed for AJAX refresh
+  - /judge/score_inline/<reg_id>   — AJAX endpoint (returns JSON)
+    so judge can score without page reload
+"""
+import datetime
+import json
+
+from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, session
+try:
+    from google.cloud.firestore_v1.base_query import FieldFilter
+except ImportError:
+    FieldFilter = None
+
+class DynamicDBProxy:
+    def __getattr__(self, name):
+        try:
+            import app as app_module
+            if hasattr(app_module, 'db') and app_module.db is not None:
+                return getattr(app_module.db, name)
+        except Exception:
+            pass
+        try:
+            from models import db as models_db
+            return getattr(models_db, name)
+        except Exception:
+            raise AttributeError(f"No DB available for attribute '{name}'")
+
+db = DynamicDBProxy()
+from utils import login_required, role_required, log_action, safe_int
+
+judge_bp    = Blueprint('judge', __name__, url_prefix='/judge')
+JUDGE_ROLES = ['Judge', 'SuperAdmin', 'Super Admin']
+
+
+def _ff(f, op, v):
+    return FieldFilter(f, op, v)
+
+
+def normalize_criteria(raw_criteria):
+    """
+    Normalizes judging criteria into a consistent list of dictionaries:
+    [{'name': str, 'max_score': int, 'key': str, 'slug': str, 'weight': int}]
+    Handles list of strings, list of dicts, comma-separated strings, or JSON strings.
+    """
+    if not raw_criteria:
+        raw_criteria = ['Overall Score']
+    if isinstance(raw_criteria, str):
+        try:
+            raw_criteria = json.loads(raw_criteria)
+        except Exception:
+            raw_criteria = [c.strip() for c in raw_criteria.split(',') if c.strip()]
+    if not isinstance(raw_criteria, list):
+        raw_criteria = [raw_criteria]
+
+    normalized = []
+    for item in raw_criteria:
+        if isinstance(item, dict):
+            name = str(item.get('name') or item.get('criterion') or 'Overall Score').strip()
+            max_score = safe_int(item.get('max_score'), default=100)
+            if max_score <= 0:
+                max_score = 100
+            weight = safe_int(item.get('weight'), default=1)
+        elif isinstance(item, str):
+            name = item.strip()
+            max_score = 100
+            weight = 1
+        else:
+            name = str(item).strip()
+            max_score = 100
+            weight = 1
+        slug = name.replace(' ', '_').lower()
+        key = f"score_{slug}"
+        normalized.append({
+            'name': name,
+            'max_score': max_score,
+            'weight': weight,
+            'slug': slug,
+            'key': key,
+        })
+    return normalized or [{
+        'name': 'Overall Score',
+        'max_score': 100,
+        'weight': 1,
+        'slug': 'overall_score',
+        'key': 'score_overall_score',
+    }]
+
+
+def submission_round(event: dict) -> dict | None:
+    """When judges score the hackathon's submission round (UPG-298):
+    {'open': True while teams can still submit}. Otherwise None."""
+    import services_hackathon
+    import services_hackathon_eval
+    if not services_hackathon_eval.judges_score_submissions(event):
+        return None
+    return {'open': services_hackathon.window(event) != 'closed'}
+
+
+def finale_round(event: dict) -> bool:
+    """A hackathon's round after its shortlist, set to "every judge sees every
+    finalist" (UPG-309): any judge scores any finalist, none assigned and none
+    checked in. Without that setting the finale is judged as any round."""
+    import services_hackathon
+    import services_hackathon_eval
+    from services_rounds import round_info
+    if not services_hackathon.has_form(event) or not services_hackathon_eval.finale_open(event):
+        return False
+    sl = services_hackathon_eval.shortlist(event)
+    return bool(sl) and round_info(event)['current'] == int(sl.get('to_round') or 0)
+
+
+def judge_teams(event_id: str, event: dict, judge_email: str) -> list:
+    """The registrations this judge scores now, as (id, data) pairs.
+    Usually: checked in, still in, the current round and (unless open hall)
+    assigned to this judge. In a submission round scored by judges: after
+    the deadline, every team still in that submitted; a team assigned to a
+    judge is that judge's only."""
+    cur_round = event.get('active_round', 1)
+    if finale_round(event):
+        from services_rounds import round_teams
+        return [(t['id'], t['reg']) for t in round_teams(db, event_id, event)]
+    sub_round = submission_round(event)
+    if sub_round is not None:
+        if sub_round['open']:
+            return []
+        import services_hackathon
+        submitted = {str(s.get('registration_id')) for s in services_hackathon.submissions(db, event_id)}
+        regs = db.collection('registrations').where(filter=_ff('event_id', '==', event_id)).stream()
+        out = []
+        for r in regs:
+            d = r.to_dict() or {}
+            if d.get('is_eliminated') or d.get('current_round', 1) != cur_round or r.id not in submitted:
+                continue
+            mine = d.get('assigned_judge_email')
+            if not event.get('open_hall_mode') and mine and mine != judge_email:
+                continue
+            out.append((r.id, d))
+        return out
+    regs = (db.collection('registrations')
+              .where(filter=_ff('event_id',    '==', event_id))
+              .where(filter=_ff('attendance',  '==', 'Present'))
+              .stream())
+    out = []
+    for r in regs:
+        d = r.to_dict() or {}
+        if d.get('is_eliminated') or d.get('current_round', 1) != cur_round:
+            continue
+        # In normal mode, only show teams assigned to this judge
+        if not event.get('open_hall_mode', False) and d.get('assigned_judge_email') != judge_email:
+            continue
+        out.append((r.id, d))
+    return out
+
+
+def _submission_round_refusal(event: dict, reg_id: str):
+    """Why this team can't be scored yet in a judges-scored submission
+    round, or None."""
+    sub_round = submission_round(event)
+    if sub_round is None:
+        return None
+    if sub_round['open']:
+        return "Submissions are still open. Score the teams after the submission deadline."
+    import services_hackathon
+    if not any(str(s.get('registration_id')) == str(reg_id)
+               for s in services_hackathon.submissions(db, event['id'])):
+        return "This team didn't submit, so there is nothing to score."
+    return None
+
+
+# =========================================================
+# 1. JUDGE DASHBOARD
+# =========================================================
+@judge_bp.route('/dashboard')
+@login_required
+@role_required(JUDGE_ROLES)
+def dashboard():
+    from services_permission import can
+    email     = session.get('user_id')
+    user_role = session.get('role')
+    my_events = []
+
+    JUDGING_STATUSES = {
+        'active', 'in_progress', 'evaluation', 'registration_open', 'registration_closed', 'published'
+    }
+
+    for e in db.collection('events').stream():
+        data  = e.to_dict() or {}
+        data['id'] = e.id
+        status = str(data.get('status') or '').lower()
+        if status in JUDGING_STATUSES and can(session, 'score', data, db=db):
+            # Count scored / total teams for progress bar: the teams this
+            # judge scores now (UPG-298: a judged submission round counts
+            # the teams that submitted)
+            if submission_round(data) is not None or finale_round(data):
+                present = [d for _, d in judge_teams(e.id, data, email)]
+            else:
+                regs    = [r.to_dict() or {} for r in db.collection('registrations')
+                           .where(filter=_ff('event_id', '==', e.id)).stream()]
+                present = [d for d in regs if d.get('attendance') == 'Present' and not d.get('is_eliminated')]
+            scored_by_me = sum(1 for d in present if email in (d.get('scores') or {}))
+            data['teams_total']    = len(present)
+            data['teams_scored']   = scored_by_me
+            data['open_hall_mode'] = data.get('open_hall_mode', False)
+            my_events.append(data)
+
+    return render_template('judge/dashboard.html',
+                            events=my_events,
+                            user_name=session.get('name'))
+
+
+# =========================================================
+# 2. TEAMS LIST FOR SCORING
+# =========================================================
+@judge_bp.route('/event/<event_id>')
+@login_required
+@role_required(JUDGE_ROLES)
+def event_teams(event_id):
+    from flask import abort
+    from services_permission import can
+    event_doc = db.collection('events').document(event_id).get()
+    if not event_doc.exists:
+        return redirect('/judge/dashboard')
+
+    event       = event_doc.to_dict()
+    event['id'] = event_id
+    if not can(session, 'score', event, db=db):
+        abort(403)
+    event['judging_criteria_normalized'] = normalize_criteria(event.get('judging_criteria'))
+    judge_email = session.get('user_id')
+    open_hall   = event.get('open_hall_mode', False)
+
+    teams = []
+    for reg_id, d in judge_teams(event_id, event, judge_email):
+        d['id']       = reg_id
+        d['my_score'] = (d.get('scores') or {}).get(judge_email)
+        teams.append(d)
+
+    teams.sort(key=lambda x: x.get('team_name', ''))
+    import services_hackathon   # a link to each team's submission (UPG-194)
+    return render_template('judge/teams.html',
+                            event=event, teams=teams,
+                            judge_email=judge_email,
+                            open_hall=open_hall,
+                            is_hackathon=services_hackathon.has_form(event),
+                            submission_round=submission_round(event))
+
+
+# =========================================================
+# 3. SUBMIT SCORE (form POST — full page)
+# =========================================================
+@judge_bp.route('/submit_score/<reg_id>', methods=['POST'])
+@login_required
+@role_required(JUDGE_ROLES)
+def submit_score(reg_id):
+    try:
+        reg_ref  = db.collection('registrations').document(reg_id)
+        reg_data = reg_ref.get().to_dict()
+        if not reg_data:
+            flash("Registration not found.", "danger")
+            return redirect('/judge/dashboard')
+
+        event_id  = reg_data.get('event_id')
+        event_doc = db.collection('events').document(event_id).get().to_dict() or {}
+        event_doc['id'] = event_id
+        from services_permission import can
+        if not can(session, 'score', event_doc, db=db):
+            abort(403)
+        if event_doc.get('scoring_locked'):
+            flash("Scoring is locked by the SPOC for this round.", "danger")
+            if request.is_json or 'json' in request.headers.get('Accept', ''):
+                return jsonify({'status': 'locked', 'message': 'Scoring is locked by the SPOC for this round.'}), 403
+            return "locked", 403
+        from services_rounds import can_score   # only teams still in this round (UPG-149)
+        if not can_score(event_doc, reg_data):
+            message = "This team isn't in the current round, so it can't be scored."
+            if request.is_json or 'json' in request.headers.get('Accept', ''):
+                return jsonify({'status': 'error', 'message': message}), 409
+            flash(message, "warning")
+            return redirect(f'/judge/event/{event_id}'), 409
+        not_yet = _submission_round_refusal(event_doc, reg_id)   # UPG-298
+        if not_yet:
+            if request.is_json or 'json' in request.headers.get('Accept', ''):
+                return jsonify({'status': 'error', 'message': not_yet}), 409
+            flash(not_yet, "warning")
+            return redirect(f'/judge/event/{event_id}'), 409
+
+        norm_criteria = normalize_criteria(event_doc.get('judging_criteria'))
+
+        score_details = {}
+        total_score   = 0
+
+        json_data = request.get_json(silent=True) or {}
+        json_scores = json_data.get('scores') or {}
+
+        for c in norm_criteria:
+            c_name = c['name']
+            c_key = c['key']
+            c_slug = c['slug']
+            c_max = c['max_score']
+
+            val_raw = None
+            if json_scores:
+                val_raw = json_scores.get(c_name, json_scores.get(c_key, json_scores.get(c_slug)))
+            if val_raw is None:
+                val_raw = request.form.get(c_key, request.form.get(c_name, request.form.get(c_slug, 0)))
+
+            val = safe_int(val_raw, default=0)
+
+            if val < 0 or val > c_max:
+                if request.is_json or 'json' in request.headers.get('Accept', ''):
+                    return jsonify({'status': 'error', 'message': f"Score for {c_name} must be between 0 and {c_max}"}), 400
+                flash(f"Score for {c_name} must be between 0 and {c_max}.", "danger")
+                return redirect(f'/judge/event/{event_id}'), 400
+
+            score_details[c_name] = val
+            total_score += val
+
+        # A judge's score is the criteria marks added up (UPG-309): 35 + 25 + 20 is 80, not 26.7.
+        # It's stored as raw_total, which every reader takes first; `total` keeps the
+        # average per criterion it always held.
+        avg_score = round(total_score / len(norm_criteria), 1) if norm_criteria else total_score
+        avg_score = int(avg_score) if avg_score == int(avg_score) else avg_score
+        out_of = sum(c['max_score'] for c in norm_criteria) or 100
+        judge_email = session.get('user_id')
+        # A JSON score may leave out its remarks (UPG-04: None.strip() refused every such score)
+        remarks     = str((json_data.get('remarks') if json_data else request.form.get('remarks', '')) or '').strip()
+
+        reg_ref.set({
+            'scores': {
+                judge_email: {
+                    'details':      score_details,
+                    'total':        avg_score,
+                    'raw_total':    total_score,
+                    'remarks':      remarks,
+                    'judge_name':   session.get('name'),
+                    'submitted_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                }
+            }
+        }, merge=True)
+
+        log_action(db, "SCORE_SUBMITTED",
+                   f"Judge {judge_email} scored {reg_id} — avg {avg_score}")
+
+        if request.is_json or 'json' in request.headers.get('Accept', ''):
+            return jsonify({'status': 'ok', 'avg': avg_score, 'total': total_score, 'out_of': out_of,
+                            'scores': score_details, 'message': f"Score saved: {total_score} / {out_of}"}), 200
+
+        flash(f"Score saved: {total_score} / {out_of}", "success")
+        return redirect(f'/judge/event/{event_id}')
+
+    except Exception as exc:
+        if getattr(exc, 'code', None) == 403:
+            abort(403)
+        if getattr(exc, 'code', None) == 400:
+            abort(400)
+        flash(f"Error submitting score: {exc}", "danger")
+        return redirect('/judge/dashboard')
+
+
+# =========================================================
+# 4. SCORE VIA AJAX (returns JSON — used by scoring modal)
+# =========================================================
+@judge_bp.route('/score_inline/<reg_id>', methods=['POST'])
+@login_required
+@role_required(JUDGE_ROLES)
+def score_inline(reg_id):
+    """AJAX endpoint: POST JSON → returns JSON. No page reload."""
+    try:
+        body      = request.get_json() or {}
+        scores    = body.get('scores', {})      # {criterion: value}
+        remarks   = body.get('remarks', '')
+
+        reg_ref  = db.collection('registrations').document(reg_id)
+        reg_data = reg_ref.get().to_dict()
+        if not reg_data:
+            return jsonify({'status': 'error', 'message': 'Registration not found'}), 404
+
+        event_doc = db.collection('events').document(reg_data['event_id']).get().to_dict() or {}
+        event_doc['id'] = reg_data['event_id']
+        from services_permission import can
+        if not can(session, 'score', event_doc, db=db):
+            return jsonify({'status': 'error', 'message': 'Forbidden'}), 403
+        if event_doc.get('scoring_locked'):
+            return jsonify({'status': 'locked',
+                            'message': 'Scoring is locked by the SPOC for this round.'}), 403
+        from services_rounds import can_score   # only teams still in this round (UPG-149)
+        if not can_score(event_doc, reg_data):
+            return jsonify({'status': 'error',
+                            'message': "This team isn't in the current round, so it can't be scored."}), 409
+        not_yet = _submission_round_refusal(event_doc, reg_id)   # UPG-298
+        if not_yet:
+            return jsonify({'status': 'error', 'message': not_yet}), 409
+
+        norm_criteria = normalize_criteria(event_doc.get('judging_criteria'))
+
+        score_details = {}
+        total = 0
+        for c in norm_criteria:
+            c_name = c['name']
+            c_key = c['key']
+            c_slug = c['slug']
+            c_max = c['max_score']
+
+            val_raw = scores.get(c_name, scores.get(c_key, scores.get(c_slug, 0)))
+            val = safe_int(val_raw, default=0)
+
+            if val < 0 or val > c_max:
+                return jsonify({
+                    'status': 'error',
+                    'message': f"Score for {c_name} must be between 0 and {c_max}"
+                }), 400
+
+            score_details[c_name] = val
+            total += val
+
+        # The judge's score is the marks added up, stored as raw_total (UPG-309);
+        # `total` keeps the average per criterion it always held
+        avg = round(total / len(norm_criteria), 1) if norm_criteria else total
+        avg = int(avg) if avg == int(avg) else avg
+        out_of = sum(c['max_score'] for c in norm_criteria) or 100
+
+        judge_email = session.get('user_id')
+        reg_ref.set({
+            'scores': {
+                judge_email: {
+                    'details':      score_details,
+                    'total':        avg,
+                    'raw_total':    total,
+                    'remarks':      remarks,
+                    'judge_name':   session.get('name'),
+                    'submitted_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                }
+            }
+        }, merge=True)
+
+        log_action(db, "SCORE_INLINE",
+                   f"Judge {judge_email} scored {reg_id} (AJAX) — avg {avg}")
+        return jsonify({'status': 'ok', 'avg': avg, 'total': total, 'out_of': out_of,
+                        'message': f'Score saved: {total} / {out_of}'})
+
+    except Exception as exc:
+        if getattr(exc, 'code', None) == 403:
+            return jsonify({'status': 'error', 'message': 'Forbidden'}), 403
+        return jsonify({'status': 'error', 'message': str(exc)}), 500
+
+
+# =========================================================
+# 5. LIVE LEADERBOARD JSON (AJAX polling — 10s refresh)
+# =========================================================
+@judge_bp.route('/leaderboard/<event_id>')
+@login_required
+@role_required(JUDGE_ROLES)
+def leaderboard(event_id):
+    """Returns JSON leaderboard for AJAX refresh on teams page."""
+    # One ranking for every board (UPG-84)
+    from services_leaderboard import for_event
+    board = [{'team_name': row['team_name'], 'lead_name': row['lead_name'], 'score': row['score'],
+              'score_text': row['score_text'], 'judges': row['judges'], 'room': row['room'] or '—',
+              'rank': row['rank'], 'tied': row['tied']}
+             for row in for_event(db, event_id)]
+
+    return jsonify({'status': 'ok', 'data': board})
+
+
+# =========================================================
+# AI SPEECH-TO-SCORE DICTATION PARSER
+# =========================================================
+@judge_bp.route('/speech-to-score', methods=['POST'])
+@login_required
+@role_required(JUDGE_ROLES)
+def speech_to_score():
+    try:
+        body       = request.get_json() or {}
+        transcript = body.get('transcript', '').strip()
+        criteria   = body.get('criteria', ['Overall Score'])
+
+        if not transcript:
+            return jsonify({'status': 'error', 'message': 'No speech transcript received.'}), 400
+
+        api_key = current_app.config.get('GEMINI_API_KEY', '')
+        result  = None
+
+        if api_key:
+            try:
+                from google import genai
+                import json
+                client = genai.Client(api_key=api_key)
+                prompt = (
+                    f"You are a speech-to-score parser for an event judging panel. Extract scores (out of 100) and remarks from this transcript: '{transcript}'.\n"
+                    f"The target criteria are: {criteria}.\n"
+                    f"Return ONLY a JSON object with this exact structure (no markdown fences, no prose):\n"
+                    f"{{\n"
+                    f"  \"scores\": {{\n"
+                    + ",\n".join([f"    \"{c}\": <int>" for c in criteria])
+                    + "\n  },\n"
+                    "  \"remarks\": \"<string: extracted remarks/comments>\"\n"
+                    "}\n"
+                )
+                response = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=prompt
+                )
+                raw = response.text.strip()
+                if raw.startswith('```'):
+                    raw = raw.split('\n', 1)[1] if '\n' in raw else raw[3:]
+                    raw = raw.rsplit('```', 1)[0].strip()
+                result = json.loads(raw)
+            except Exception as e:
+                current_app.logger.error("Error in speech-to-score Gemini parser: %s", e)
+
+        if not result:
+            # Fallback regex-based parsing
+            import re
+            scores  = {}
+            remarks = ""
+            words   = transcript.lower()
+            for c in criteria:
+                pattern = rf"\b{re.escape(c.lower())}\b.*?(\d+)"
+                match   = re.search(pattern, words)
+                if not match:
+                    pattern = rf"(\d+)\s*(?:points|score)?\s*(?:for|on|in|to)?\s*\b{re.escape(c.lower())}\b"
+                    match   = re.search(pattern, words)
+                if match:
+                    val = int(match.group(1))
+                    if 0 <= val <= 100:
+                        scores[c] = val
+            remarks_match = re.search(r"(?:remarks|comments|comment|remark)\b\s*(?:is|are|was)?\s*(.*)", words, re.IGNORECASE)
+            if remarks_match:
+                remarks = remarks_match.group(1).strip()
+            else:
+                if not scores:
+                    remarks = transcript
+            result = {'scores': scores, 'remarks': remarks}
+
+        return jsonify({'status': 'ok', 'result': result})
+
+    except Exception as exc:
+        return jsonify({'status': 'error', 'message': str(exc)}), 500
+

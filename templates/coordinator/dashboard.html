@@ -1,0 +1,608 @@
+{% extends "base_classic.html" %}
+{#- On the app layout and portal design system (UPG-63). -#}
+{% import 'includes/ui.html' as ui with context %}
+{#- A Super Admin opens this page from "Coordinator view": it is labelled as that
+    view, not as a second admin home (UPG-80). -#}
+{%- set as_admin = session.get('role') in ('SuperAdmin', 'Super Admin') -%}
+{% set app_active = 'coordinator' if as_admin else 'dashboard' %}
+{% if as_admin %}{% set app_title = 'Coordinator view' %}{% set app_subtitle = 'Seen as Super Admin' %}{% endif %}
+{% block title %}{{ 'Coordinator view' if as_admin else 'Coordinator dashboard' }}{% endblock %}
+{% block page_title %}{% if as_admin %}Coordinator view{% else %}Welcome, {{ user_name }}{% endif %}{% endblock %}
+{% block page_sub %}{% if as_admin %}What event coordinators work with: registrations, staff, rooms, rounds and results for every event.{% else %}{% if club_category %}<span class="se-badge se-badge--gold me-2"><i class="fas fa-tags" aria-hidden="true"></i> {{ club_category }} division</span>{% endif %}Manage registrations, staff, room allocations, rounds and results.{% endif %}{% endblock %}
+{#- Events are created in the event wizard, which saves a draft for review (UPG-78);
+    coordinators who can't use it ask their SPOC. -#}
+{% block page_actions %}{% if session.get('role') in ('ClubSPOC', 'SuperAdmin', 'Super Admin') %}<a href="/spoc/create_event" class="btn btn-gold"><i class="fas fa-plus" aria-hidden="true"></i> Create event</a>{% endif %}{% endblock %}
+{% block extra_css %}
+<style>
+/* Coordinator dashboard (UPG-63) */
+.ev-status { position: absolute; top: 12px; right: 12px; z-index: 3; }
+/* An event without an image: a thin band, not an empty block (UPG-371) */
+.ev-band { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+           padding: 10px 14px; background: var(--brand-navy); border-bottom: 3px solid var(--brand-gold); }
+.ev-band .ev-cat { position: static; }
+.form-builder-badge.none { background: var(--surface-sunken); color: var(--text-muted); }
+.ev-counts { display: flex; background: var(--surface-sunken); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px; }
+.ev-counts > div { flex: 1; text-align: center; }
+.ev-counts > div + div { border-left: 1px solid var(--border); }
+.ev-counts__label { display: block; font-size: var(--fs-xs); font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
+.coord-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 28px; }
+.btn-snpsu-blue { background: var(--brand-navy); color: #fff; border: 1px solid var(--brand-navy); font-weight: 600; border-radius: var(--radius-sm); }
+.btn-snpsu-blue:hover, .btn-snpsu-blue:focus-visible { background: var(--brand-navy-900, #000f3d); color: #fff; }
+.btn-snpsu-orange { background: var(--brand-gold); color: var(--brand-navy); border: 1px solid var(--brand-gold); font-weight: 600; border-radius: var(--radius-sm); }
+.btn-snpsu-orange:hover, .btn-snpsu-orange:focus-visible { background: var(--brand-gold-700); border-color: var(--brand-gold-700); color: #fff; }
+/* ── WIZARD ────────────────────────────────────── */
+        .wizard-step { display: none; }
+.wizard-step.active { display: block; animation: fadeIn 0.4s; }
+@keyframes fadeIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+.step-indicator { display: flex; justify-content: space-between; margin-bottom: 30px; position: relative; }
+.step-indicator::before { content:''; position:absolute; top:15px; left:0; width:100%; height:3px; background:var(--ink-200); z-index:1; }
+.step-dot { width:35px; height:35px; border-radius:50%; background:var(--ink-200); color:var(--ink-600); display:flex; align-items:center; justify-content:center; font-weight:bold; z-index:2; position:relative; transition:0.3s; }
+.step-dot.active { background:var(--brand-gold); color:var(--brand-navy); box-shadow:0 0 0 5px rgba(198,157,103,0.25); }
+.step-dot.completed { background:var(--brand-navy); color:white; }
+/* ── FORM TYPE CARDS (Step 3) ───────────────────── */
+        .reg-type-card { border: 2px solid var(--ink-200); border-radius: 14px; padding: 20px 18px; cursor: pointer; transition: 0.2s; text-align: center; background: var(--bg-card); color: var(--ink-800); }
+.reg-type-card:hover { border-color: var(--brand-navy); background: var(--bg-soft); color: var(--ink-900); }
+.reg-type-card.selected { border-color: var(--brand-gold); background: var(--brand-gold-100); box-shadow: 0 0 0 3px rgba(198,157,103,0.2); }
+.reg-type-card .big-icon { font-size: 2.2rem; margin-bottom: 10px; display: block; }
+.reg-type-card h6 { font-size: 14px; font-weight: 700; margin: 0 0 4px; color: var(--ink-900); }
+.reg-type-card p { font-size: 11px; color: var(--ink-500); margin: 0; }
+/* ── FORM BUILDER BADGE on event card ───────────── */
+        .form-builder-badge { display: inline-flex; align-items: center; gap: 5px;
+            background: var(--info-soft); color: var(--info-text, var(--info)); border-radius: 20px;
+            padding: 3px 10px; font-size: 11px; font-weight: 700; }
+.form-builder-badge.custom { background: var(--brand-gold-100); color: var(--brand-gold-700); }
+</style>
+{% endblock %}
+{% block content %}
+{% if as_admin %}
+<div class="callout callout--brand d-flex flex-wrap align-items-center justify-content-between gap-2">
+  <span><i class="fas fa-crown" aria-hidden="true"></i> This is the page event coordinators use. Your own home is the admin dashboard.</span>
+  <a href="/admin/dashboard" class="btn btn-primary btn-sm">Return to admin <i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+</div>
+{% endif %}
+
+<div>
+
+    <!-- Stats -->
+    <div class="coord-stats">
+        {{ ui.stat_tile('fa-calendar-check', events|length, 'Events managed') }}
+        {{ ui.stat_tile('fa-users', total_regs, 'Total registrations') }}
+        {{ ui.stat_tile('fa-user-tie', total_staff, 'Staff appointed') }}
+    </div>
+    {% if hides_finished %}
+    <p class="small text-muted mt-n2 mb-3" data-stats-note>Events that are over aren't shown or counted here.</p>
+    {% endif %}
+
+    <h2 class="h5 fw-bold mb-3">
+        <i class="fas fa-tasks me-2 text-gold" aria-hidden="true"></i> Event control centre
+    </h2>
+    {% set search_label = 'Search events by title, venue or category' %}
+    {% include "includes/list_search.html" %}
+
+    <!-- ── EVENT CARDS ──────────────────────────────────── -->
+    <div class="row g-4">
+        {% for event in page.items %}
+        <div class="col-lg-4 col-md-6">
+            <div class="ev-card d-flex flex-column h-100" data-event-card="{{ event.id }}">
+            {% set os = organiser_status(event) %}{#- UPG-362: the SPOC console's words, not "Closed" for an event yet to start -#}
+
+                {% set cat = event.get('category','General') %}
+                {% if not event.get('banner_url') %}
+                {#- No image: a thin band with the category and status, not a 150 px empty block (UPG-371) -#}
+                <div class="ev-band" data-banner="none">
+                    <span class="ev-cat cat-{{ cat|lower }}">{{ cat }}</span>
+                    <span class="se-badge se-badge--{{ os.tone }}" title="{{ os.explanation }}" data-organiser-status="{{ os.key }}">{{ os.label }}</span>
+                </div>
+                {% else %}
+                <!-- Card Banner (matches Home Page UI) -->
+                <div class="ev-banner" aria-hidden="true">
+                        <img src="{{ event.banner_url }}" alt="" loading="lazy" data-h-error="coordinator/dashboard:5">
+                        <div class="ev-overlay"></div>
+                    {% if   cat == 'Technical'  %}<div class="ev-banner-icon"><i class="fas fa-laptop-code" aria-hidden="true"></i></div>
+                    {% elif cat == 'Cultural'   %}<div class="ev-banner-icon"><i class="fas fa-masks-theater" aria-hidden="true"></i></div>
+                    {% elif cat == 'Sports'     %}<div class="ev-banner-icon"><i class="fas fa-futbol" aria-hidden="true"></i></div>
+                    {% elif cat == 'Management' %}<div class="ev-banner-icon"><i class="fas fa-chart-line" aria-hidden="true"></i></div>
+                    {% else                     %}<div class="ev-banner-icon"><i class="fas fa-star" aria-hidden="true"></i></div>{% endif %}
+                    <span class="ev-cat cat-{{ cat|lower }}">{{ cat }}</span>
+                    <span class="se-badge se-badge--{{ os.tone }} ev-status" title="{{ os.explanation }}" data-organiser-status="{{ os.key }}">{{ os.label }}</span>
+                </div>
+                {% endif %}
+
+                <!-- Card body (matches Home Page ev-body style but with coordinator actions) -->
+                <div class="ev-body d-flex flex-column flex-grow-1">
+                    <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                        <h3 class="ev-title m-0">{{ event.title }}</h3>
+                    </div>
+                    
+                    <!-- Form type badge -->
+                    <div class="mb-3">
+                        {% if event.get('form_type') == 'custom' %}
+                            <span class="form-builder-badge custom">
+                                <i class="fas fa-paint-brush" aria-hidden="true"></i> Custom form
+                            </span>
+                        {% elif event.get('has_custom_form') %}
+                            <span class="form-builder-badge">
+                                <i class="fas fa-rectangle-list" aria-hidden="true"></i> Simple form
+                            </span>
+                        {% else %}
+                            <span class="form-builder-badge none">
+                                <i class="fas fa-exclamation-circle" aria-hidden="true"></i> No form yet
+                            </span>
+                        {% endif %}
+                    </div>
+
+                    <div class="ev-meta mb-3">
+                        <p class="text-muted small mb-1">
+                            <i class="far fa-clock me-1 text-primary"></i>
+                            <strong>Event:</strong> {{ event.date|day }}
+                        </p>
+                        <p class="text-danger small mb-0">
+                            <i class="fas fa-hourglass-end me-1" aria-hidden="true"></i>
+                            <strong>Deadline:</strong> {{ (event.deadline | day) if event.deadline else 'Not set' }}
+                        </p>
+                    </div>
+
+                    <div class="ev-counts mb-3">
+                        <div class="text-center w-50">
+                            <small class="ev-counts__label">Participants</small>
+                            <span class="fw-bold fs-5">{{ event.registration_count }}</span>
+                        </div>
+                        <div class="text-center w-50">
+                            <small class="ev-counts__label">Staff</small>
+                            <span class="fw-bold fs-5">{{ event.staff|length }}</span>
+                        </div>
+                    </div>
+
+                    <div class="mt-auto d-grid gap-2">
+                        {#- A sports event: the matches, results and live scoring, on every status (UPG-387) -#}
+                        {% if event.get('tournament') or event.get('category') == 'Sports' %}
+                        <a href="/tournament/{{ event.id }}" class="btn btn-success" data-tournament-link>
+                            <i class="fas fa-stopwatch me-1" aria-hidden="true"></i> Matches &amp; live scoring
+                        </a>
+                        {% endif %}
+                        {% if event.status == 'active' %}
+
+                            {# Only for those who can edit the event; the builder refuses others (UPG-68) #}
+                            {% if event.can_edit_form %}
+                            <!-- ★ FORM BUILDER BUTTON ★ -->
+                            <a href="/forms/builder/{{ event.id }}"
+                               class="btn btn-primary">
+                                <i class="fas fa-rectangle-list me-1" aria-hidden="true"></i>
+                                {% if event.get('has_custom_form') %}
+                                    Edit registration form
+                                {% else %}
+                                    Build registration form
+                                {% endif %}
+                            </a>
+                            {% endif %}
+
+                            <!-- View Responses -->
+                            {% if event.get('has_custom_form') %}
+                            <a href="/forms/responses/{{ event.id }}"
+                               class="btn btn-outline-primary">
+                                <i class="fas fa-table me-1" aria-hidden="true"></i>
+                                View form responses
+                                {% if event.registration_count > 0 %}
+                                <span class="se-badge se-badge--brand ms-1">{{ event.registration_count }}</span>
+                                {% endif %}
+                            </a>
+                            {% endif %}
+
+                            <div class="btn-group w-100">
+                                <button type="button" class="btn btn-outline-secondary w-50"
+                                        data-bs-toggle="modal"
+                                        data-bs-target="#editModal{{ event.id }}">
+                                    <i class="fas fa-edit" aria-hidden="true"></i> Edit
+                                </button>
+                                <a data-pick-columns href="/coordinator/export_registrations/{{ event.id }}"
+                                   class="btn btn-outline-secondary w-50">
+                                    <i class="fas fa-file-export" aria-hidden="true"></i> Export
+                                </a>
+                            </div>
+
+                            <a href="/coordinator/runsheet/{{ event.id }}" class="btn btn-outline-secondary w-100 mt-1" data-runsheet-link>
+                                <i class="fas fa-clipboard-list me-1" aria-hidden="true"></i> Run sheet
+                            </a>
+
+                            <!-- View students + Export Excel — NEW -->
+                            <div class="btn-group w-100 mt-1 mb-1">
+                                <a href="/coordinator/registrations/{{ event.id }}"
+                                   class="btn btn-primary w-50">
+                                    <i class="fas fa-users me-1" aria-hidden="true"></i> View students
+                                </a>
+                                <a data-pick-columns href="/coordinator/export_excel/{{ event.id }}"
+                                   class="btn btn-outline-secondary w-50">
+                                    <i class="fas fa-file-excel me-1" aria-hidden="true"></i> Excel
+                                </a>
+                            </div>
+                            <a href="/ticket/badges/{{ event.id }}.pdf" target="_blank" rel="noopener"
+                               class="btn btn-outline-secondary w-100 mb-2">
+                                <i class="fas fa-id-badge me-1" aria-hidden="true"></i> Print name badges
+                            </a>
+                            <a href="/interact/{{ event.id }}/host"
+                               class="btn btn-outline-secondary w-100 mb-2">
+                                <i class="fas fa-square-poll-vertical me-1" aria-hidden="true"></i> Live polls &amp; Q&amp;A
+                            </a>
+
+                            <button type="button" class="btn btn-outline-primary"
+                                    data-bs-toggle="modal"
+                                    data-bs-target="#staffModal{{ event.id }}">
+                                <i class="fas fa-user-shield me-1" aria-hidden="true"></i> Appoint staff / judges
+                            </button>
+
+                            <!-- AI judge matching button -->
+                            <a href="/ai/match_page/{{ event.id }}"
+                               class="btn btn-outline-primary">
+                                <i class="fas fa-brain me-1" aria-hidden="true"></i> AI judge match
+                                {% if event.get('ai_match_applied') %}
+                                <span class="se-badge se-badge--success ms-1">Applied</span>
+                                {% endif %}
+                            </a>
+
+                            <div class="btn-group w-100">
+                                <button type="button" class="btn btn-outline-secondary w-50"
+                                        data-bs-toggle="modal"
+                                        data-bs-target="#allocateModal{{ event.id }}">
+                                    <i class="fas fa-network-wired" aria-hidden="true"></i> Allocate
+                                </button>
+                                <form method="POST" action="/coordinator/trigger_reminders/{{ event.id }}" class="w-50 m-0"
+                                      data-h-submit="coordinator/dashboard:6">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button type="submit" class="btn btn-outline-secondary w-100">
+                                        <i class="fas fa-paper-plane" aria-hidden="true"></i> Remind
+                                    </button>
+                                </form>
+                            </div>
+
+                            <button type="button" class="btn btn-outline-danger mb-1"
+                                    data-bs-toggle="modal"
+                                    data-bs-target="#eliminateModal{{ event.id }}">
+                                <i class="fas fa-filter me-1" aria-hidden="true"></i> Next round / eliminate
+                            </button>
+
+                            <button type="button" class="btn btn-outline-secondary mt-1"
+                                    data-bs-toggle="modal"
+                                    data-bs-target="#broadcastModal{{ event.id }}">
+                                <i class="fas fa-bullhorn me-1" aria-hidden="true"></i> Broadcast message
+                            </button>
+
+                            <button type="button" class="btn btn-gold mt-2"
+                                    data-bs-toggle="modal"
+                                    data-bs-target="#publishModal{{ event.id }}">
+                                <i class="fas fa-trophy me-1" aria-hidden="true"></i> End event &amp; publish
+                            </button>
+
+                        {% else %}
+                            {% if os.key == 'ended' %}
+                            <a data-pick-columns href="/coordinator/export_registrations/{{ event.id }}"
+                               class="btn btn-primary w-100 mb-2">
+                                <i class="fas fa-file-excel me-1" aria-hidden="true"></i> Export final data
+                            </a>
+                            {% endif %}
+                            <div class="btn-group w-100 mb-2">
+                                <a href="/coordinator/registrations/{{ event.id }}"
+                                   class="btn btn-primary w-50">
+                                    <i class="fas fa-users me-1" aria-hidden="true"></i> View students
+                                </a>
+                                <a data-pick-columns href="/coordinator/export_excel/{{ event.id }}"
+                                   class="btn btn-outline-secondary w-50">
+                                    <i class="fas fa-file-excel me-1" aria-hidden="true"></i> Excel
+                                </a>
+                            </div>
+                            <a href="/forms/responses/{{ event.id }}"
+                               class="btn btn-outline-secondary w-100 mb-2">
+                                <i class="fas fa-table me-1" aria-hidden="true"></i> View form responses
+                            </a>
+                            {% if os.key == 'ended' %}
+                            <button type="button" class="btn btn-secondary" disabled>Event concluded</button>
+                            {% endif %}
+                        {% endif %}
+                        {#- UPG-362: no "Delete event" here; the SPOC deletes from the event's own page -#}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── MODALS FOR THIS EVENT ──────────────────────── -->
+
+        <!-- Eliminate modal -->
+        <div class="modal fade" id="eliminateModal{{ event.id }}" tabindex="-1">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header bg-danger text-white">
+                        <h5 class="modal-title"><i class="fas fa-filter me-2"></i>Manage rounds &amp; eliminations</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <form action="/coordinator/promote_round/{{ event.id }}" method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="round" value="{{ event.active_round | default(1) }}">
+                        <div class="modal-body p-4">
+                            <div class="alert alert-warning border-warning bg-light text-center">
+                                <h6 class="fw-bold mb-1">
+                                    Current Active Round: {{ event.active_round | default(1) }} of {{ [event.total_rounds | default(1) | int, event.active_round | default(1) | int] | max }}
+                                </h6>
+                                <small class="text-muted">
+                                    Teams whose average judge score is at or above the cut-off advance to Round
+                                    {{ (event.active_round | default(1)) + 1 }}.
+                                    Others are eliminated. Every round's scores are kept.
+                                </small>
+                            </div>
+                            <div class="mb-3 mt-4">
+                                <label class="form-label text-danger">Cut-off Score</label>
+                                <input aria-label="Cut-off Score" type="number" step="0.1" name="cutoff_score"
+                                       class="form-control border-danger form-control-lg text-center fw-bold fs-3"
+                                       placeholder="e.g. 75" required>
+                            </div>
+                        </div>
+                        <div class="modal-footer bg-light">
+                            <button type="submit" class="btn btn-danger px-4 fw-bold w-100 fs-5"
+                                    data-h-click="coordinator/dashboard:8">
+                                Execute Elimination <i class="fas fa-skull-crossbones ms-2"></i>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Allocate modal -->
+        <div class="modal fade" id="allocateModal{{ event.id }}" tabindex="-1">
+            <div class="modal-dialog modal-lg modal-dialog-centered">
+                <div class="modal-content border-dark">
+                    <div class="modal-header on-brand">
+                        <h5 class="modal-title"><i class="fas fa-network-wired me-2"></i>Smart auto-allocation</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <form action="/coordinator/allocate_rooms/{{ event.id }}" method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <div class="modal-body p-4">
+                            <div class="alert alert-info border-info bg-light">
+                                <strong>Total Registered Teams:</strong> {{ event.registration_count }}<br>
+                                <small>Define rooms and capacities — the system randomly assigns judges and active participants.</small>
+                            </div>
+                            <div id="roomContainer{{ event.id }}">
+                                <div class="row g-2 mb-3 align-items-end room-row">
+                                    <div class="col-md-7">
+                                        <label class="form-label">Room / Venue Name</label>
+                                        <input aria-label="Room / Venue Name" type="text" name="room_name[]" class="form-control border-dark" placeholder="e.g. Room 101" required>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">Capacity (Teams)</label>
+                                        <input aria-label="Capacity (Teams)" type="number" name="capacity[]" class="form-control border-dark" placeholder="e.g. 25" required>
+                                    </div>
+                                    <div class="col-md-1 pb-1">
+                                        <button type="button" class="btn btn-primary w-100"
+                                                data-h-click="coordinator/dashboard:9" data-h-a0="{{ event.id }}">
+                                            <i class="fas fa-plus"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer bg-light">
+                            <button type="submit" class="btn btn-dark px-4 fw-bold w-100">
+                                Execute Random Allocation <i class="fas fa-magic ms-2"></i>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Edit modal -->
+        <div class="modal fade" id="editModal{{ event.id }}" tabindex="-1">
+            <div class="modal-dialog modal-xl modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header on-brand">
+                        <h5 class="modal-title">Edit — {{ event.title }}</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <form action="/coordinator/edit_event/{{ event.id }}" method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <div class="modal-body p-4">
+                            <div class="row g-3 mb-3">
+                                <div class="col-md-8">
+                                    <label class="form-label">Event Title</label>
+                                    <input aria-label="Event Title" type="text" name="title" class="form-control" value="{{ event.title }}" required>
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label">Entry Fee (₹)</label>
+                                    <input aria-label="Entry Fee (₹)" type="number" name="entry_fee" class="form-control" value="{{ event.entry_fee }}">
+                                </div>
+                            </div>
+                            <div class="row g-3 mb-3">
+                                <div class="col-md-4">
+                                    <label class="form-label">Event Date &amp; Time</label>
+                                    <input aria-label="Event Date &amp; Time" type="text" name="date" class="form-control" value="{{ event.date }}" required>
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label text-danger">Reg Deadline</label>
+                                    <input aria-label="Reg Deadline" type="text" name="deadline" class="form-control border-danger" value="{{ event.deadline }}">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label">Venue</label>
+                                    <input aria-label="Venue" type="text" name="venue" class="form-control" value="{{ event.venue }}" required>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label text-primary">
+                                    <i class="fas fa-images me-2"></i>Event Media Gallery
+                                </label>
+                                <div id="editMediaContainer{{ event.id }}">
+                                    {% if event.media_urls %}
+                                        {% for url in event.media_urls %}
+                                        <div class="input-group mb-2">
+                                            <input aria-label="Event Media Gallery" type="url" name="media_urls[]" class="form-control" value="{{ url }}">
+                                            {% if loop.index == 1 %}
+                                            <button class="btn btn-outline-success px-4" type="button"
+                                                    data-h-click="coordinator/dashboard:10" data-h-a1="{{ event.id }}">
+                                                <i class="fas fa-plus"></i>
+                                            </button>
+                                            {% else %}
+                                            <button class="btn btn-outline-danger px-4" type="button"
+                                                    data-h-click="coordinator/dashboard:11">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                            {% endif %}
+                                        </div>
+                                        {% endfor %}
+                                    {% else %}
+                                        <div class="input-group mb-2">
+                                            <input aria-label="Primary Image URL" type="url" name="media_urls[]" class="form-control"
+                                                   value="{{ event.banner_url }}" placeholder="Primary Image URL">
+                                            <button class="btn btn-outline-success px-4" type="button"
+                                                    data-h-click="coordinator/dashboard:12" data-h-a2="{{ event.id }}">
+                                                <i class="fas fa-plus"></i>
+                                            </button>
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div class="mb-3 p-3 bg-light border border-success rounded">
+                                <label class="form-label text-success">
+                                    <i class="fas fa-balance-scale me-2"></i>Judging Criteria (Comma Separated)
+                                </label>
+                                <input aria-label="Judging Criteria (Comma Separated)" type="text" name="criteria" class="form-control border-success"
+                                       value="{{ event.judging_criteria | default([]) | join(', ') }}" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label text-primary">Overview</label>
+                                <textarea aria-label="Overview" name="overview" class="form-control" rows="3" required>{{ event.overview }}</textarea>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label text-danger">Rules</label>
+                                <textarea aria-label="Rules" name="rules" class="form-control" rows="3">{{ event.rules }}</textarea>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label text-warning">Prizes</label>
+                                <textarea aria-label="Prizes" name="prizes" class="form-control" rows="2">{{ event.prizes }}</textarea>
+                            </div>
+                            <div class="form-check form-switch mt-3">
+                                <input aria-label="Is team" class="form-check-input" type="checkbox" name="is_team"
+                                       {% if event.is_team_event %}checked{% endif %}>
+                                <label class="form-check-label fw-bold text-dark">Team Event</label>
+                            </div>
+                        </div>
+                        <div class="modal-footer bg-light">
+                            <button type="submit" class="btn btn-snpsu-blue px-4">Save Changes</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Staff modal -->
+        <div class="modal fade" id="staffModal{{ event.id }}" tabindex="-1">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Appoint staff</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body p-4">
+                        <form action="/coordinator/assign_staff/{{ event.id }}" method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <div class="mb-3">
+                                <label class="form-label">Role</label>
+                                <select aria-label="Role" name="role" class="form-select">
+                                    <option value="EventCoordinator">Event Coordinator (Scanner)</option>
+                                    <option value="Judge">Event Judge</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Name</label>
+                                <input aria-label="Name" type="text" name="name" class="form-control" required>
+                            </div>
+                            <div class="mb-4">
+                                <label class="form-label">Email</label>
+                                <input aria-label="Email" type="email" name="email" class="form-control" required>
+                            </div>
+                            <button type="submit" class="btn btn-snpsu-blue w-100 py-2">
+                                Appoint &amp; Send Login
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Broadcast modal -->
+        <div class="modal fade" id="broadcastModal{{ event.id }}" tabindex="-1">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header on-brand">
+                        <h5 class="modal-title">
+                            <i class="fas fa-bullhorn me-2" aria-hidden="true"></i>Broadcast alert
+                        </h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body p-4">
+                        <form action="/coordinator/broadcast/{{ event.id }}" method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <div class="mb-3">
+                                <label class="form-label text-danger">Subject</label>
+                                <input aria-label="Subject" type="text" name="subject" class="form-control"
+                                       placeholder="URGENT: Venue Change" required>
+                            </div>
+                            <div class="mb-4">
+                                <label class="form-label text-danger">Message</label>
+                                <textarea aria-label="Message" name="message" class="form-control" rows="4" required></textarea>
+                            </div>
+                            <button type="submit" class="btn btn-danger w-100 fw-bold py-2">
+                                <i class="fas fa-paper-plane me-2"></i>Send to All Participants
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Publish modal -->
+        <div class="modal fade" id="publishModal{{ event.id }}" tabindex="-1">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-body text-center p-5">
+                        <i class="fas fa-trophy fa-3x text-gold mb-3" aria-hidden="true"></i>
+                        <h2 class="h4 fw-bold">Conclude event?</h2>
+                        <form action="/coordinator/publish_results/{{ event.id }}" method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-gold btn-lg w-100">
+                                Publish final results
+                            </button>
+                        </form>
+                        {% if event.get('status') == 'completed' %}
+                        <a href="/ai/results_page/{{ event.id }}"
+                           class="btn btn-outline-primary w-100 mt-2">
+                            <i class="fas fa-brain me-1"></i>
+                            View AI result summaries
+                            {% if event.get('ai_summaries_generated') %}
+                            <span class="se-badge se-badge--success ms-1">Ready</span>
+                            {% endif %}
+                        </a>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {% else %}
+        {% if page.q %}
+        <p class="text-muted text-center w-100 py-5">No events match “{{ page.q }}”.</p>
+        {% else %}{#- UPG-294: a coordinator can't create events; say what is true and where to go -#}
+        <p class="text-muted text-center w-100 pt-5 mb-3">You aren't on the staff of any event that is still to come. The organiser adds you from the event's Staff page, and the event stays here until its day is over.</p>
+        <p class="text-center w-100 pb-4" data-coordinator-empty><a class="btn btn-primary" href="/coordinator/scanner"><i class="fas fa-qrcode" aria-hidden="true"></i> Open the entry scanner</a></p>
+        {% endif %}
+        {% endfor %}
+    </div><!-- /row -->
+    {% include "includes/pagination.html" %}
+
+
+
+</div><!-- /container -->
+
+{% include "layouts/_bootstrap_js.html" %}
+<script src="/static/js/pages/coordinator__dashboard.js"></script>
+
+{% endblock %}
+{% block handler_scripts %}{{ super() }}<script src="/static/js/handlers/coordinator__dashboard.js"></script>
+{% endblock %}

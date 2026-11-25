@@ -1,0 +1,131 @@
+{% extends "base_classic.html" %}
+
+{% set app_active = 'users' %}
+{% block title %}Users{% endblock %}
+{% block page_title %}Users{% endblock %}
+{% block page_sub %}Every account on the portal. Open one to change its role, department or category, or to deactivate it.{% endblock %}
+{% block extra_css %}
+<style>
+/* On a phone each account is a card (UPG-369) */
+@media (max-width: 767.98px) {
+  .table-stack td.au-main { display: block; text-align: left; padding-top: 0.6rem; }
+  /* the email cell stays a plain <td> (tests read it); its label comes from here */
+  .table-stack td.au-main + td { overflow-wrap: anywhere; }
+  .table-stack td.au-main + td::before { content: "Email"; }
+  .table-stack td.au-act { flex-wrap: wrap; justify-content: flex-start; }
+  .table-stack td.au-act::before { content: none; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-body">
+
+        <p>
+            Accounts that someone else creates (walk-ins, staff, SPOCs) open only through an emailed
+            set-password link, which expires after 3 days. If someone's link has expired, send them a new one here.
+            People who already have a password can use "Forgot password" on the login page.
+        </p>
+
+        <details class="card mb-3" {{ 'open' if not accounts }}>
+            <summary class="card-header" style="cursor:pointer"><strong><i class="fas fa-user-plus text-gold me-1" aria-hidden="true"></i> Add a user</strong> <span class="text-muted small">(any role; they get a set-password email)</span></summary>
+            <div class="card-body">
+                <form method="POST" action="/admin/users/add" class="row g-2">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="col-md-4"><label class="form-label" for="nu-name">Name</label><input class="form-control" id="nu-name" name="name" required></div>
+                    <div class="col-md-4"><label class="form-label" for="nu-email">Email</label><input class="form-control" type="email" id="nu-email" name="email" required></div>
+                    <div class="col-md-4"><label class="form-label" for="nu-phone">Phone <span class="text-muted fw-normal">(optional)</span></label><input class="form-control" id="nu-phone" name="phone"></div>
+                    <div class="col-md-4"><label class="form-label" for="nu-role">Role</label>
+                        <select class="form-select" id="nu-role" name="role" required>{% for value, label in roles %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+                    <div class="col-md-4"><label class="form-label" for="nu-cat">Category <span class="text-muted fw-normal">(SPOCs, coordinators)</span></label>
+                        <select class="form-select" id="nu-cat" name="category"><option value="">Not set</option>{% for c in categories %}<option value="{{ c }}">{{ 'All categories' if c == 'All' else c }}</option>{% endfor %}</select></div>
+                    <div class="col-md-4"><label class="form-label" for="nu-dept">Department <span class="text-muted fw-normal">(optional)</span></label><input class="form-control" id="nu-dept" name="department"></div>
+                    <div class="col-12"><button class="btn btn-primary" type="submit"><i class="fas fa-user-plus" aria-hidden="true"></i> Create account</button></div>
+                </form>
+            </div>
+        </details>
+
+        {#- UPG-271: the file is checked first; nothing changes until the preview is confirmed -#}
+        <div class="card mb-4" id="roster">
+            <div class="card-header">
+                <strong>Import Student Roster (CSV)</strong>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-2">
+                    Upload a CSV file with a heading row. Columns: <code>email</code> (required), <code>name</code>, <code>usn</code>, <code>department</code>, <code>year</code>, <code>section</code>, <code>cgpa</code>, <code>backlogs</code>.
+                    You see what each row would do, and anything wrong with it, before anything is changed.
+                    <a href="/admin/users/import/sample.csv">Download a sample file</a>
+                </p>
+                <form method="POST" action="/admin/users/import/check" enctype="multipart/form-data" class="row g-2 align-items-center" data-roster-upload>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="col-auto">
+                        <label for="roster-csv" class="visually-hidden">Roster CSV file</label>
+                        <input type="file" id="roster-csv" name="file" accept=".csv,text/csv" required class="form-control form-control-sm">
+                    </div>
+                    <div class="col-auto">
+                        <button type="submit" class="btn btn-sm btn-primary">Check the file</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="d-flex flex-wrap gap-2 mb-2" aria-label="Filter by role">
+            <a href="/admin/users" class="se-badge {{ 'se-badge--brand' if not role_filter else 'se-badge--neutral' }}">All</a>
+            {% for value, label in roles %}<a href="/admin/users?role={{ value }}" class="se-badge {{ 'se-badge--brand' if role_filter == value else 'se-badge--neutral' }}">{{ label }}</a>{% endfor %}
+            <a href="/admin/users?role=inactive" class="se-badge {{ 'se-badge--brand' if role_filter == 'inactive' else 'se-badge--neutral' }}">Deactivated</a>
+        </div>
+        {% include "includes/list_search.html" %}
+        <div class="table-responsive">
+            <table class="table table-stack" data-phone-cards>
+                <thead>
+                    <tr>
+                        <th scope="col">Name</th>
+                        <th scope="col">Email</th>
+                        <th scope="col">Role</th>
+                        <th scope="col">Password</th>
+                        <th scope="col"><span class="visually-hidden">Actions</span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for a in accounts %}
+                    <tr>
+                        <td class="au-main">
+                            <a href="/admin/users/{{ a.email }}">{{ a.name or '—' }}</a>{% if not a.active %} <span class="badge badge-danger">Deactivated</span>{% endif %}
+                            {% if a.usn %}
+                                <div class="small text-muted">{{ a.usn }}{% if a.department %} &middot; {{ a.department }}{% endif %}{% if a.year %} (Yr {{ a.year }}{% if a.section %} Sec {{ a.section }}{% endif %}){% endif %}</div>
+                            {% endif %}
+                        </td>
+                        <td>{{ a.email }}</td>
+                        <td data-label="Role">{{ a.role or '—' }}</td>
+                        <td data-label="Password">
+                            {% if a.waiting %}
+                                <span class="badge badge-warning">Waiting for first password</span>
+                            {% else %}
+                                <span class="badge badge-success">Set</span>
+                            {% endif %}
+                        </td>
+                        <td class="au-act">
+                            {% if a.can_resend %}
+                            <form method="POST" action="/admin/users/resend_set_password">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="email" value="{{ a.email }}">
+                                <button type="submit" class="btn btn-sm btn-primary">Resend set-password link</button>
+                            </form>
+                            {% endif %}
+                            {% if a.role in ('Student', 'Participant') %}
+                            <a href="/admin/users/{{ a.email }}/academics" class="btn btn-sm btn-link">Academic record</a>
+                            {% endif %}
+                            <a href="/admin/users/{{ a.email }}" class="btn btn-sm btn-outline-primary">Open</a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="5">No accounts yet.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% include "includes/pagination.html" %}
+    </div>
+</div>
+{% endblock %}

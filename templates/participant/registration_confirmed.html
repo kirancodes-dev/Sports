@@ -1,0 +1,62 @@
+{% extends "layouts/status.html" %}
+{% set site_footer_fixed = false %}{#- the set-password box can make it taller than a phone screen (UPG-148) -#}
+{#- Registration confirmation (UPG-63): the shared status card. -#}
+{% set status_tone = 'success' %}
+{% set status_icon = 'fa-check' %}
+{% block title %}Registration confirmed{% endblock %}
+{% block extra_css %}
+<style>
+.detail-row { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--divider); text-align: left; }
+.detail-row:last-of-type { border-bottom: 0; }
+.detail-icon { width: 34px; height: 34px; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: var(--brand-navy-50); color: var(--brand-ink); }
+.detail-label { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .05em; color: var(--text-subtle); font-weight: 600; }
+.detail-val { font-size: var(--fs-base); font-weight: 600; color: var(--text-strong); margin-top: 2px; }
+</style>
+{% endblock %}
+{% block status %}
+  <h1>You're registered!</h1>
+  <p class="mb-3"><strong>{{ event_title }}</strong></p>
+
+  {% if event_date %}
+  <div class="detail-row">
+    <div class="detail-icon" aria-hidden="true"><i class="fas fa-calendar-alt"></i></div>
+    <div><div class="detail-label">Event date</div><div class="detail-val">{{ event_date }}</div></div>
+  </div>
+  {% endif %}
+  {% if venue %}
+  <div class="detail-row">
+    <div class="detail-icon" aria-hidden="true"><i class="fas fa-map-marker-alt"></i></div>
+    <div><div class="detail-label">Venue</div><div class="detail-val">{{ venue }}</div></div>
+  </div>
+  {% endif %}
+  <div class="detail-row">
+    <div class="detail-icon" aria-hidden="true"><i class="fas fa-envelope"></i></div>
+    <div><div class="detail-label">Confirmation email</div><div class="detail-val">Sent to your inbox</div></div>
+  </div>
+
+  <div class="callout callout--brand text-start mt-3 mb-0">
+    <i class="fas fa-lock" aria-hidden="true"></i>
+    Your <strong>QR entry ticket</strong> is emailed to you <strong>1 day before the event</strong> and unlocked in your dashboard.
+  </div>
+
+  {# New account: the set-password link was emailed (no password is ever shown) #}
+  {% if is_new_user %}
+  <div class="callout callout--warning text-start mt-3 mb-0" data-login-email="{{ login_email or 'sent' }}">
+    <strong><i class="fas fa-envelope" aria-hidden="true"></i> Set your password</strong>
+    <div class="d-flex justify-content-between gap-2 mt-2 small"><span>Email</span><span class="fw-bold font-monospace" id="cred-email">{{ user_email }}</span></div>
+    {% if login_email in ('limit', 'failed') %}
+    {#- UPG-152: today's email limit was reached, or the mail provider failed -#}
+    <div class="small mt-2" role="alert">We could not send your password-setup email. Please contact the hackathon organizer for assistance; your registration is saved.</div>
+    {% else %}
+    <div class="small mt-2">We've emailed you a one-time link to set your password; it expires in 48 hours. After that, log in with this email and your new password to open your dashboard and ticket.</div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% include 'includes/push_optin.html' %}
+
+  <div class="status-actions">
+    <a href="/participant/dashboard" class="btn btn-primary"><i class="fas fa-tachometer-alt" aria-hidden="true"></i> Go to my dashboard</a>
+    <a href="/" class="btn btn-secondary"><i class="fas fa-home" aria-hidden="true"></i> Back to home</a>
+  </div>
+{% endblock %}

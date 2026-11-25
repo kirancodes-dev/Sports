@@ -1,0 +1,91 @@
+{% extends "base_classic.html" %}
+{#- On the app layout and portal design system (UPG-63). -#}
+{% import 'includes/ui.html' as ui with context %}
+{% set app_active = 'dashboard' %}
+{% block title %}Judge panel | SapthaEvent{% endblock %}
+{% block page_title %}Judge panel{% endblock %}
+{% block page_sub %}Hello, {{ user_name }}. These are the events assigned to you for scoring.{% endblock %}
+{% block extra_css %}
+<style>
+/* Judge dashboard (UPG-63) */
+.judge-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 24px; }
+.judge-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.judge-event { background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-sm); display: flex; flex-direction: column; }
+.judge-event__head { background: var(--brand-navy); border-bottom: 3px solid var(--brand-gold); padding: 16px 18px; color: #fff; }
+.judge-event__title { font-size: 1rem; font-weight: 700; color: #fff; margin: 0; }
+.judge-event__meta { font-size: var(--fs-xs); color: rgba(255,255,255,.75); margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.judge-event__body { padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; flex: 1; }
+.judge-progress-label { display: flex; justify-content: space-between; font-size: var(--fs-sm); color: var(--text-muted); }
+.judge-progress-label strong { color: var(--text-strong); }
+.judge-progress { height: 8px; background: var(--surface-sunken); border-radius: var(--radius-pill); overflow: hidden; }
+.judge-progress > div { height: 100%; background: var(--brand-gold); border-radius: var(--radius-pill); }
+.judge-event__body .btn { margin-top: auto; }
+</style>
+{% endblock %}
+{% block content %}
+{% if session.get('role') in ('SuperAdmin', 'Super Admin') %}
+<div class="callout callout--brand d-flex flex-wrap align-items-center justify-content-between gap-2">
+  <span><i class="fas fa-crown" aria-hidden="true"></i> You are viewing the judge panel as <strong>Super Admin</strong>.</span>
+  <a href="/admin/dashboard" class="btn btn-primary btn-sm">Return to admin <i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+</div>
+{% endif %}
+
+{% if events %}
+{% set total = events|sum(attribute='teams_total') %}
+{% set scored = events|sum(attribute='teams_scored') %}
+<div class="judge-stats">
+  {{ ui.stat_tile('fa-calendar-check', events|length, 'Events assigned') }}
+  {{ ui.stat_tile('fa-people-group', total, 'Teams to judge') }}
+  {{ ui.stat_tile('fa-star', scored, 'Teams scored') }}
+  {{ ui.stat_tile('fa-chart-pie', (((scored / total * 100)|round|int) if total > 0 else 0)|string ~ '%', 'Completion') }}
+</div>
+
+<div class="judge-grid">
+  {% for event in events %}
+  <article class="judge-event">
+    <div class="judge-event__head">
+      <h2 class="judge-event__title">{{ event.title }}</h2>
+      <div class="judge-event__meta">
+        <span><i class="fas fa-calendar-alt me-1" aria-hidden="true"></i>{{ (event.date or 'Date to be announced')|day }}</span>
+        <span><i class="fas fa-map-marker-alt me-1" aria-hidden="true"></i>{{ venue_label(event) }}</span>
+      </div>
+      {% if event.open_hall_mode %}
+      <span class="se-badge se-badge--gold mt-2"><i class="fas fa-door-open" aria-hidden="true"></i> Open hall mode</span>
+      {% endif %}
+    </div>
+    <div class="judge-event__body">
+      <div>
+        <div class="judge-progress-label">
+          <span>Scoring progress</span>
+          <strong>{{ event.teams_scored }} / {{ event.teams_total }}</strong>
+        </div>
+        {% if event.teams_total > 0 %}
+        {% set pct = (event.teams_scored / event.teams_total * 100)|int %}
+        <div class="judge-progress mt-2" role="progressbar" aria-label="Scoring progress" aria-valuenow="{{ pct }}" aria-valuemin="0" aria-valuemax="100"><div style="width: {{ pct }}%;"></div></div>
+        {% endif %}
+      </div>
+
+      {% if event.teams_total == 0 %}
+      <p class="text-muted small mb-0">No present teams assigned yet. Check back after the event starts.</p>
+      {% else %}
+      <a href="/judge/event/{{ event.id }}" class="btn {{ 'btn-outline-primary' if event.teams_scored == event.teams_total else 'btn-gold' }} w-100">
+        {% if event.teams_scored == event.teams_total and event.teams_total > 0 %}
+          <i class="fas fa-check-circle" aria-hidden="true"></i> Review scores
+        {% else %}
+          <i class="fas fa-star" aria-hidden="true"></i> Score teams
+        {% endif %}
+      </a>
+      {% endif %}
+    </div>
+  </article>
+  {% endfor %}
+</div>
+
+{% else %}
+<div class="panel">
+  {{ ui.empty_state('fa-gavel', 'No events assigned', 'The SPOC will assign you as a judge once an event is ready for judging. Your events will appear here automatically.') }}
+</div>
+{% endif %}
+
+{% include "layouts/_bootstrap_js.html" %}
+{% endblock %}

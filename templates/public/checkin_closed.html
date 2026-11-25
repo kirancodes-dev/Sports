@@ -1,0 +1,10 @@
+{% extends "layouts/status.html" %}
+{% set status_tone = 'warning' %}
+{% set status_icon = 'fa-circle-stop' %}
+{% block title %}Check-in closed{% endblock %}
+{% block status %}
+  <h1>Check-in closed</h1>
+  <p>Check-in for <strong>{{ event.title }}</strong> is closed because the event is no longer active.</p>
+  <p class="small">If you think this is a mistake, please contact the event coordinator.</p>
+  <div class="status-actions"><a href="/" class="btn btn-primary">Back to the portal</a></div>
+{% endblock %}

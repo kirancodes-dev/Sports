@@ -1,0 +1,9 @@
+{% extends "layouts/status.html" %}
+{% set status_tone = 'success' %}
+{% set status_icon = 'fa-circle-check' %}
+{% block title %}Already checked in{% endblock %}
+{% block status %}
+  <h1>You're already checked in, {{ name }}</h1>
+  <p>You are already marked <strong>present</strong> for <strong>{{ event.title }}</strong>. Enjoy the event!</p>
+  <div class="status-actions"><a href="/" class="btn btn-primary">Portal home</a></div>
+{% endblock %}

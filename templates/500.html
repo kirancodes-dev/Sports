@@ -1,0 +1,16 @@
+{% extends "layouts/status.html" %}
+{% set status_tone = 'danger' %}
+{% set status_icon = 'fa-triangle-exclamation' %}
+{% block title %}Something went wrong{% endblock %}
+{% block status %}
+  <p class="eyebrow mb-1">Error 500</p>
+  <h1>Something went wrong</h1>
+  <p>An unexpected error occurred on our side. Please try again in a moment; if it keeps happening, contact your event coordinator.</p>
+  <div class="status-actions">
+    <a href="/" class="btn btn-primary"><i class="fas fa-home" aria-hidden="true"></i> Portal home</a>
+    <a href="/" data-h-click="se:back" class="btn btn-secondary"><i class="fas fa-arrow-left" aria-hidden="true"></i> Go back</a>
+  </div>
+  <p class="small text-subtle mt-3 mb-0" style="word-break: break-all;">Reference: {{ request.url if request else '' }}</p>
+{% endblock %}
+{% block extra_js %}<script src="/static/js/global.js"></script>{% endblock %}
+{% block handler_scripts %}{{ super() }}<script src="/static/js/handlers/500.js"></script>{% endblock %}

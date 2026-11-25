@@ -1,0 +1,112 @@
+{% extends "base_classic.html" %}
+{#- Public live leaderboard (UPG-63): app layout; reloads every 15 s for projectors. -#}
+{% block robots %}{% if hidden or staff_only %}noindex, nofollow{% else %}index, follow{% endif %}{% endblock %}
+{% block title %}Live leaderboard — {{ event.get('title','Event') }}{% endblock %}
+{% block page_title %}{{ event.get('title','Event') }}{% endblock %}
+{% block page_sub %}Live leaderboard · Sapthagiri NPS University{% endblock %}
+{% block page_actions %}<span class="se-badge se-badge--success live-pill">Live</span>{% endblock %}
+{% block extra_css %}
+<style>
+.live-pill::before { animation: livePulse 1.6s ease-in-out infinite; }
+.top-three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--grid-gap); margin-bottom: var(--sp-6); align-items: end; }
+.podium-card { background: var(--surface-card); border-radius: var(--radius); padding: 20px 16px; text-align: center; border: 1px solid var(--border); }
+.podium-card.first { border: 2px solid var(--brand-gold); background: var(--brand-gold-100); padding-top: 28px; }
+.medal { font-size: 1.75rem; display: block; margin-bottom: 6px; }
+.podium-card.first .medal { color: var(--brand-gold-600); }
+.podium-card.second .medal { color: #94a3b8; }
+.podium-card.third .medal { color: #b0703a; }
+.podium-place { font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-subtle); }
+.podium-name { font-family: var(--font-heading); font-size: var(--fs-md); font-weight: 700; color: var(--text-strong); margin-top: 2px; }
+.podium-score { font-family: var(--font-heading); font-size: 1.8rem; font-weight: 800; color: var(--brand-ink); margin-top: 4px; font-variant-numeric: tabular-nums; }
+.podium-lead { font-size: var(--fs-sm); color: var(--text-subtle); margin-top: 2px; }
+.rank-no { font-family: var(--font-heading); font-weight: 800; color: var(--text-subtle); width: 56px; }
+.score-cell { font-family: var(--font-heading); font-size: 1.05rem; font-weight: 800; color: var(--brand-ink); text-align: right; font-variant-numeric: tabular-nums; }
+.updated { font-size: var(--fs-xs); color: var(--text-subtle); text-align: right; margin-top: var(--sp-3); }
+@media (max-width: 575.98px) { .top-three { grid-template-columns: 1fr; } .podium-card.first { order: -1; } }
+</style>
+{% endblock %}
+{% block content %}
+  {#- Hidden until the organiser makes it public (UPG-300); this page reloads itself, so it appears once they do. -#}
+  {% if hidden %}
+  <div class="empty-state" data-leaderboard-hidden>
+    <i class="fas fa-eye-slash" aria-hidden="true"></i>
+    <h3>Not public yet</h3>
+    <p>{{ hidden }}</p>
+  </div>
+  <div class="updated" id="updated-ts" aria-live="polite">Last updated: loading…</div>
+  {% else %}
+  {% if staff_only %}
+  <div class="alert alert-warning" role="status" data-leaderboard-staff-only>
+    <i class="fas fa-user-shield" aria-hidden="true"></i> Only the event's staff can see these scores. The public sees "Not public yet" until the organiser makes the leaderboard public.
+  </div>
+  {% endif %}
+  {% if board %}
+
+  {#- Places come from services_leaderboard: equal scores share a place (UPG-84). -#}
+  {%- set place_names = {1: '1st place', 2: '2nd place', 3: '3rd place'} -%}
+  {%- macro podium_card(row, cls, icon) -%}
+    <div class="podium-card {{ cls }}">
+      {% if row %}
+      <span class="medal"><i class="fas {{ icon }}" aria-hidden="true"></i></span>
+      <div class="podium-place">{{ 'Joint ' if row.tied }}{{ place_names.get(row.rank, 'Place ' ~ row.rank) }}</div>
+      <div class="podium-name">{{ row.team_name }}</div>
+      <div class="podium-score">{{ row.score_text }}</div>
+      <div class="podium-lead">{{ row.lead_name }}</div>
+      {% endif %}
+    </div>
+  {%- endmacro %}
+  <div class="top-three" aria-label="Top three">
+    {{ podium_card(board[1] if board|length >= 2 else None, 'second', 'fa-medal') }}
+    {{ podium_card(board[0], 'first', 'fa-trophy') }}
+    {{ podium_card(board[2] if board|length >= 3 else None, 'third', 'fa-medal') }}
+  </div>
+
+  {% if board|length > 3 %}
+  <div class="table-responsive">
+    <table class="table">
+      <thead>
+        <tr>
+          <th scope="col">Rank</th>
+          <th scope="col">Team</th>
+          <th scope="col">Lead</th>
+          <th scope="col">Room</th>
+          <th scope="col">Judges</th>
+          <th scope="col" class="text-end">Score</th>
+        </tr>
+      </thead>
+      <tbody id="lb-body">
+        {% for row in board[3:] %}
+        <tr>
+          <td class="rank-no">{% if row.tied %}<span title="Shared place">={{ row.rank }}</span>{% else %}{{ row.rank }}{% endif %}</td>
+          <td class="fw-semibold text-strong">{{ row.team_name }}</td>
+          <td class="text-subtle">{{ row.lead_name }}</td>
+          <td class="text-subtle">{{ row.room or '—' }}</td>
+          <td><span class="se-badge se-badge--info se-badge--plain">{{ row.judges_count }}</span></td>
+          <td class="score-cell">{{ row.score_text }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% else %}
+  <div class="empty-state">
+    <i class="fas fa-hourglass-half" aria-hidden="true"></i>
+    <h3>No scores yet</h3>
+    <p>Scores will appear here as judges submit them.</p>
+  </div>
+  {% endif %}
+
+  <div class="updated" id="updated-ts" aria-live="polite">Last updated: loading…</div>
+
+  {% if not staff_only %}
+  {% set share_title = "Check out the live leaderboard for " ~ event.get('title','Event') ~ " at Sapthagiri NPS University! #SapthaEvent" %}
+  {% set share_label = "Share leaderboard" %}
+  {% include 'includes/share_strip.html' %}
+  {% endif %}
+  {% endif %}
+{% endblock %}
+{% block extra_js %}
+<script src="/static/js/pages/public__leaderboard.js"></script>
+{% endblock %}

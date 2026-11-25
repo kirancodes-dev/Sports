@@ -1,0 +1,161 @@
+{% extends "base_classic.html" %}
+{#- Live streams (UPG-63): app layout; the player stays dark, everything else on the light system.
+    The viewer counts, likes and chat on this page are simulated in the browser (UPG-65). -#}
+{% block robots %}index, follow{% endblock %}
+{% block title %}SapthaEvent LiveStream{% endblock %}
+{% block page_sub %}Watch campus fest stages live.{% endblock %}
+{% block page_actions %}
+  <a href="/live/reels" class="btn btn-outline-primary"><i class="fas fa-video" aria-hidden="true"></i> Highlight reels</a>
+{% endblock %}
+{% block extra_css %}
+    <style>
+        .player-wrapper { position: relative; background: #000; border-radius: var(--radius); overflow: hidden; aspect-ratio: 16/9; box-shadow: var(--shadow); }
+        .player-video { width: 100%; height: 100%; object-fit: cover; }
+        .player-overlay {
+            position: absolute; inset: 0;
+            background: linear-gradient(180deg, rgba(0,10,46,0.6) 0%, transparent 30%, transparent 65%, rgba(0,10,46,0.85) 100%);
+            display: flex; flex-direction: column; justify-content: space-between;
+            padding: 18px; pointer-events: none; z-index: 10; color: #fff;
+        }
+        .player-overlay * { pointer-events: auto; }
+        .badge-live { background: var(--danger); color: #fff; font-weight: 700; font-size: 11px; padding: 4px 10px; border-radius: var(--radius-xs); text-transform: uppercase; letter-spacing: 0.05em; }
+        .viewer-count, .quality-pill { background: rgba(0,10,46,0.6); padding: 4px 10px; border-radius: var(--radius-xs); font-size: 12px; font-weight: 500; border: 1px solid rgba(255,255,255,0.15); color: #fff; }
+        .stream-title { font-family: var(--font-heading); font-weight: 700; color: #fff; margin-bottom: 4px; font-size: clamp(1rem, 2vw, 1.3rem); }
+        .stream-sub { color: rgba(255,255,255,0.8); font-size: var(--fs-sm); margin: 0; }
+        .like-bubble-container { position: absolute; bottom: 80px; right: 20px; width: 80px; height: 250px; pointer-events: none; overflow: hidden; z-index: 5; }
+        .like-bubble { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); font-size: 22px; color: var(--brand-gold); animation: bubble-up 2.5s ease-out forwards; }
+        @keyframes bubble-up {
+            0% { bottom: 0; transform: translateX(-50%) scale(0.5); opacity: 1; }
+            50% { transform: translateX(calc(-50% + var(--drift, 20px))) scale(1.1); }
+            100% { bottom: 200px; transform: translateX(calc(-50% + var(--drift, -20px))) scale(0.8); opacity: 0; }
+        }
+        .btn-like { width: 48px; height: 48px; border-radius: 50%; background: var(--brand-gold); color: var(--brand-navy-900); border: none; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+        .btn-like:hover { background: var(--brand-gold-300); }
+        .likes-count { color: #fff; font-size: var(--fs-sm); font-weight: 700; }
+        .stream-card { cursor: pointer; padding: 14px 16px; }
+        .stream-card:hover { border-color: var(--brand-navy); }
+        .stream-card.active { border-color: var(--brand-navy); box-shadow: inset 3px 0 0 var(--brand-gold); }
+        .stream-card h3 { font-size: var(--fs-base); margin: 6px 0 2px; }
+        .chat-panel { height: calc(100vh - 220px); min-height: 520px; display: flex; flex-direction: column; }
+        .chat-messages { flex-grow: 1; overflow-y: auto; margin-bottom: 14px; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; }
+        .chat-msg { background: var(--surface-sunken); border: 1px solid var(--divider); border-radius: var(--radius-sm); padding: 9px 12px; font-size: var(--fs-sm); }
+        .chat-msg-user { font-weight: 700; color: var(--brand-ink); margin-bottom: 2px; font-size: var(--fs-xs); }
+        .chat-msg-user.text-warning { color: var(--brand-gold-700) !important; }
+        .chat-msg-text { color: var(--text); word-break: break-word; }
+        @media (max-width: 767.98px) { .chat-panel { height: 480px; min-height: 0; } }
+    </style>
+{% endblock %}
+{% block content %}
+        <div class="row g-4">
+            <!-- Left Side: Main Player -->
+            <div class="col-lg-8 col-md-7">
+                <div class="player-wrapper">
+                    <!-- Standard video source loops a clean animated tech abstract video for mock stream -->
+                    <video id="main-video" class="player-video" autoplay loop muted playsinline poster="/static/img/event_slide1.webp">
+                    </video>
+
+                    <div class="player-overlay">
+                        <!-- Top details -->
+                        <div class="d-flex justify-content-between align-items-center w-100">
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="badge-live"><i class="fas fa-circle me-1"></i> Live</span>
+                                <span class="viewer-count"><i class="fas fa-eye me-1" aria-hidden="true"></i> <span id="view-counter">1,420</span> watching</span>
+                            </div>
+                            <span class="quality-pill"><i class="fas fa-wifi me-1" aria-hidden="true"></i> 1080p</span>
+                        </div>
+
+                        <!-- Bottom Stream description & Likes -->
+                        <div class="d-flex justify-content-between align-items-end w-100">
+                            <div>
+                                <h2 class="stream-title" id="stream-title">Cultural Night Main Stage - SNPSU Campus</h2>
+                                <p class="stream-sub"><i class="fas fa-calendar-alt me-2" aria-hidden="true"></i>Sapthagiri Intercollegiate Fest 2026</p>
+                            </div>
+                            <div class="d-flex flex-column align-items-center gap-2" style="position: relative;">
+                                <div class="like-bubble-container" id="bubble-box"></div>
+                                <span class="likes-count" id="likes-counter">854</span>
+                                <button type="button" class="btn-like" id="like-btn" aria-label="Like this stream">
+                                    <i class="fas fa-heart"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Channel / Other Active Streams list -->
+                <h2 class="h5 mt-4 mb-3"><i class="fas fa-list-ul text-gold me-2" aria-hidden="true"></i>Fest channels</h2>
+                <div class="row g-3">
+                    <div class="col-sm-6 col-md-4">
+                        <div class="panel stream-card active" role="button" tabindex="0" data-h-click="public/live_streams:1">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="se-badge se-badge--danger">Live</span>
+                                <span class="text-muted small"><i class="fas fa-eye me-1"></i> 1.4K</span>
+                            </div>
+                            <h3 class="text-truncate">Cultural Main Stage</h3>
+                            <p class="text-muted small m-0 text-truncate">Fashion Show, Dance & Music</p>
+                        </div>
+                    </div>
+                    <div class="col-sm-6 col-md-4">
+                        <div class="panel stream-card" role="button" tabindex="0" data-h-click="public/live_streams:2">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="se-badge se-badge--danger">Live</span>
+                                <span class="text-muted small"><i class="fas fa-eye me-1"></i> 520</span>
+                            </div>
+                            <h3 class="text-truncate">AI Hackathon Stage</h3>
+                            <p class="text-muted small m-0 text-truncate">Demo pit & SPOC review board</p>
+                        </div>
+                    </div>
+                    <div class="col-sm-6 col-md-4">
+                        <div class="panel stream-card" role="button" tabindex="0" data-h-click="public/live_streams:3">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="se-badge se-badge--neutral">Ended</span>
+                                <span class="text-muted small"><i class="fas fa-eye-slash me-1"></i> VOD</span>
+                            </div>
+                            <h3 class="text-truncate">RoboWars Stadium</h3>
+                            <p class="text-muted small m-0 text-truncate">Heavyweight combat highlights</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Side: Live Chat Panel -->
+            <div class="col-lg-4 col-md-5">
+                <div class="panel chat-panel">
+                    <div class="panel__head">
+                        <span><i class="fas fa-comments" aria-hidden="true"></i>Live fest chat</span>
+                        <span class="se-badge se-badge--brand se-badge--plain ms-auto">Everyone</span>
+                    </div>
+
+                    <!-- Messages list -->
+                    <div class="chat-messages" id="chat-messages-container">
+                        <div class="chat-msg">
+                            <div class="chat-msg-user">Rohan Joshi</div>
+                            <div class="chat-msg-text">Man, the fashion show teams are raising the bar! 🔥</div>
+                        </div>
+                        <div class="chat-msg">
+                            <div class="chat-msg-user text-warning">Amit K. (SPOC)</div>
+                            <div class="chat-msg-text">Please note: Certificates will be digitally hash-verified using the new portal! Check your emails tonight.</div>
+                        </div>
+                        <div class="chat-msg">
+                            <div class="chat-msg-user">Preeti Sen</div>
+                            <div class="chat-msg-text">Who is performing in the rock band showdown next?</div>
+                        </div>
+                    </div>
+
+                    <!-- Input form -->
+                    <form id="chat-form" class="mt-auto">
+                        <div class="input-group">
+                            <input aria-label="Send a message to the fest" type="text" id="chat-input" class="form-control" placeholder="Send a message to the fest..." required maxlength="150">
+                            <button class="btn btn-primary" type="submit" aria-label="Send">
+                                <i class="fas fa-paper-plane" aria-hidden="true"></i>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+{% endblock %}
+{% block extra_js %}
+    <script src="/static/js/pages/public__live_streams.js"></script>
+{% endblock %}
+{% block handler_scripts %}{{ super() }}<script src="/static/js/handlers/public__live_streams.js"></script>{% endblock %}

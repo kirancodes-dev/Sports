@@ -1,0 +1,157 @@
+{% extends "base_classic.html" %}
+{#- On the app layout and portal design system (UPG-63). -#}
+{% block title %}Scoring audit — {{ event.title }}{% endblock %}
+{% block page_title %}Scoring audit{% endblock %}
+{% block page_sub %}Event: <span class="text-strong fw-semibold">{{ event.title }}</span> | Analytics layer for normalized grading consistency.{% endblock %}
+{% block page_actions %}<a href="/spoc/dashboard" class="btn btn-secondary"><i class="fas fa-arrow-left" aria-hidden="true"></i> Console</a>
+<button type="button" class="btn btn-primary " data-h-click="spoc/judging_audit:1">
+                        <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> Apply Normalization Matrix
+                    </button>{% endblock %}
+{% block extra_css %}
+<style>
+/* Scoring audit (UPG-63) */
+.glass-panel { background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-xs); }
+.metric-card, .kpi-card { padding: 20px; text-align: center; }
+.metric-val, .kpi-val { font-size: 1.8rem; font-weight: 800; font-family: var(--font-heading); color: var(--text-strong); font-variant-numeric: tabular-nums; }
+.uppercase { text-transform: uppercase; letter-spacing: .05em; }
+.audit-container { max-width: 1300px; }
+.badge-strictness, .sentiment-badge { padding: 3px 9px; border-radius: var(--radius-pill); font-size: var(--fs-xs); font-weight: 700; }
+.badge-strictness { text-transform: uppercase; }
+.strict, .neg { background: var(--danger-soft); color: var(--danger-text); }
+.lenient, .pos { background: var(--success-soft); color: var(--success-text); }
+.normal { background: var(--info-soft); color: var(--info-text); }
+.neu { background: var(--warning-soft); color: var(--warning-text); }
+.table-glass { width: 100%; border-collapse: separate; border-spacing: 0 8px; color: var(--text); }
+.table-glass th { border: 0; color: var(--text-subtle); font-weight: 600; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .05em; padding: 10px 12px; }
+.table-glass td { background: var(--surface-card); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 14px 12px; }
+.table-glass tr:hover td { background: var(--hover-bg); }
+.table-glass td:first-child { border-left: 1px solid var(--border); border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.table-glass td:last-child { border-right: 1px solid var(--border); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.review-card { padding: 14px; border-radius: var(--radius-sm); background: var(--surface-sunken); border: 1px solid var(--divider); margin-bottom: 12px; }
+</style>
+{% endblock %}
+{% block content %}
+
+    
+
+    <div class="audit-container">
+
+        <!-- Stats row -->
+        <div class="row g-4 mb-4">
+            <div class="col-md-4">
+                <div class="glass-panel metric-card">
+                    <span class="text-muted small fw-bold uppercase">GLOBAL SCORE AVG</span>
+                    <div class="metric-val text-primary mt-2">{{ global_avg }} <span style="font-size: 14px; font-weight: normal;">/ 10</span></div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="glass-panel metric-card">
+                    <span class="text-muted small fw-bold uppercase">POSITIVE SENTIMENT RATIO</span>
+                    <div class="metric-val text-success mt-2">{{ sentiment.score }}%</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="glass-panel metric-card">
+                    <span class="text-muted small fw-bold uppercase">TOTAL RESPONDENTS</span>
+                    <div class="metric-val text-warning mt-2">{{ sentiment.total }} Students</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-4">
+            <!-- Left Side: Judges strictness summary -->
+            <div class="col-lg-8">
+                <div class="glass-panel p-4 h-100">
+                    <h5 class="fw-bold text-strong mb-3"><i class="fas fa-user-tie text-primary me-2"></i>Judge Reliability & Variance Matrix</h5>
+                    <p class="text-muted small">Standard deviation (SD) maps variance in scoring. Standard Deviation Normalization automatically adjusts scores based on judge deviations to ensure fair results.</p>
+
+                    <div class="table-responsive">
+                        <table class="table table-glass align-middle">
+                            <thead>
+                                <tr>
+                                    <th>Judge Email</th>
+                                    <th class="text-center">Scores Given</th>
+                                    <th class="text-center">Mean Score</th>
+                                    <th class="text-center">Std Dev (SD)</th>
+                                    <th class="text-center">Strictness Status</th>
+                                    <th class="text-center">Normalization Mod</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% if judges %}
+                                    {% for j in judges %}
+                                    <tr>
+                                        <td class="font-monospace text-strong small">{{ j.email }}</td>
+                                        <td class="text-center fw-bold">{{ j.count }}</td>
+                                        <td class="text-center text-primary fw-bold">{{ j.avg }}</td>
+                                        <td class="text-center text-warning font-monospace">{{ j.std_dev }}</td>
+                                        <td class="text-center">
+                                            <span class="badge-strictness {{ j.strictness.lower() }}">{{ j.strictness }}</span>
+                                        </td>
+                                        <td class="text-center font-monospace text-info fw-bold">x{{ j.multiplier }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                {% else %}
+                                    <tr>
+                                        <td colspan="6" class="text-center text-muted py-4">No scores submitted by judges yet.</td>
+                                    </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Side: Sentiment Analysis feed -->
+            <div class="col-lg-4">
+                <div class="glass-panel p-4 h-100">
+                    <h5 class="fw-bold text-strong mb-3"><i class="fas fa-face-smile-beam text-success me-2"></i>Student Sentiment Reviews</h5>
+                    <p class="text-muted small">Realtime text processing on feedback reviews to detect event atmosphere polarity.</p>
+
+                    <div class="reviews-feed" style="max-height: 380px; overflow-y: auto;">
+                        {% for r in reviews %}
+                        <div class="review-card">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <div class="text-warning">
+                                    {% for idx in range(r.rating) %}★{% endfor %}
+                                </div>
+                                <span class="sentiment-badge {% if r.polarity == 'Positive' %}pos{% elif r.polarity == 'Neutral' %}neu{% else %}neg{% endif %}">
+                                    {{ r.polarity }}
+                                </span>
+                            </div>
+                            <p class="small text-opacity-80 m-0">"{{ r.comments }}"</p>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Normalization Alert overlay -->
+    <div class="modal fade" id="normModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border text-strong rounded-4">
+                <div class="modal-header border-bottom bg-light bg-opacity-20">
+                    <h5 class="modal-title fw-bold text-primary"><i class="fas fa-square-check me-2"></i>Matrix Normalization Success</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4 text-center">
+                    <div style="width:60px; height:60px; border-radius:50%; display:flex; align-items:center; justify-content:center; background: rgba(16,185,129,0.1); color:#10b981; border: 2px solid rgba(16,185,129,0.2); margin:0 auto 20px;" class="fs-3">
+                        <i class="fas fa-check-double"></i>
+                    </div>
+                    <h6 class="fw-bold mb-2">Score Normalization Applied Successfully!</h6>
+                    <p class="text-muted small mb-0">Judge bias metrics updated. Adjusted scores have been successfully cached for active leaderboards.</p>
+                </div>
+                <div class="modal-footer border-top bg-light bg-opacity-20">
+                    <button type="button" class="btn btn-secondary btn-sm px-3" data-bs-dismiss="modal">Close Dialog</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% include "layouts/_bootstrap_js.html" %}
+    <script src="/static/js/pages/spoc__judging_audit.js"></script>
+{% endblock %}
+{% block handler_scripts %}{{ super() }}<script src="/static/js/handlers/spoc__judging_audit.js"></script>
+{% endblock %}

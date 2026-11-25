@@ -1,0 +1,31 @@
+# Accepted gitleaks findings (fingerprint = commit:file:rule:line). CI fails on
+# anything not listed here. Add an entry only with a reason; see BLK-01 in
+# docs/FEATURE_REVIEW.md. Findings are described here, values never.
+
+# ── False positives / test dummies (permanent) ──────────────────────────────
+# tests: the production boot test's strong dummy settings as first committed
+# (UPG-20); generated at run time since UPG-118, never real values
+216f7a3122dd9b6952829c74bede7527f1969840:tests/test_production_boot.py:generic-api-key:27
+216f7a3122dd9b6952829c74bede7527f1969840:tests/test_production_boot.py:generic-api-key:28
+216f7a3122dd9b6952829c74bede7527f1969840:tests/test_production_boot.py:generic-api-key:29
+# tests: deliberately too-short and placeholder SECRET_KEY values
+efc668a73dd163d74af61f18c312f885ca980bd6:tests/test_checkin_security.py:generic-api-key:319
+efc668a73dd163d74af61f18c312f885ca980bd6:tests/test_checkin_security.py:generic-api-key:325
+# tests: pytest-only SECRET_KEY fixture
+7f4e6c3b1a0e4b104d28e28608eeeb2ee83812d1:tests/conftest.py:generic-api-key:177
+# report generator: a table cell ("API Gateway", <module name>), not a key
+7f4e6c3b1a0e4b104d28e28608eeeb2ee83812d1:generate_workflow_report.py:generic-api-key:240
+2649424295fd60808b7c56b2baf34bf120197ec5:functions/saptha_app/generate_workflow_report.py:generic-api-key:263
+
+# ── Real values that remain in old commits (history can't be scrubbed without
+#    --replace-text, which was not used). ──────────────────────────────────
+# Supabase publishable (client-side, public-by-design) key in an old
+# .env.example. Rotate if the Supabase project is still in use.
+38068e4f1de7eb8f2bab5444bc7a53f9ab580746:.env.example:generic-api-key:101
+
+# Google API keys hard-coded in old chatbot_routes.py commits. Accepted because
+# both keys were REVOKED by the owner on 2026-09-30 (BLK-01 criterion 4).
+# Google/Gemini API key (2026-03-12; same key as the old .env GEMINI_API_KEY):
+2ffe5452cf52dbf4978fa91f79e0ac5de94d69ff:chatbot_routes.py:gcp-api-key:12
+# A second, different Google API key (initial commit, 2026-03-08):
+477cec4a5e010d99da9b79de107b33335f76c075:chatbot_routes.py:gcp-api-key:12

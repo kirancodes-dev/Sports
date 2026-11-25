@@ -1,0 +1,15 @@
+{% extends "layouts/status.html" %}
+{% set status_tone = 'warning' %}
+{% set status_icon = 'fa-hourglass-half' %}
+{% block title %}Too many requests{% endblock %}
+{% block status %}
+  <p class="eyebrow mb-1">Error 429</p>
+  <h1>Please slow down</h1>
+  <p>You've made too many requests in a short time. Wait a moment, then try again.</p>
+  <div class="info-row justify-content-center" aria-live="polite">
+    <span class="info-val" id="timer">60</span><span class="info-label">seconds until you can try again</span>
+  </div>
+  <div class="status-actions"><a href="/" class="btn btn-primary"><i class="fas fa-home" aria-hidden="true"></i> Portal home</a></div>
+{% endblock %}
+{% block extra_js %}<script src="/static/js/pages/429.js"></script>{% endblock %}
+{% block handler_scripts %}{{ super() }}<script src="/static/js/handlers/429.js"></script>{% endblock %}

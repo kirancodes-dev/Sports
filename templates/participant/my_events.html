@@ -1,0 +1,171 @@
+{% extends "base_classic.html" %}
+{#- My events (UPG-63): app layout; tabs for upcoming, registered, waitlisted, attended, certificates, cancelled. -#}
+{% set app_active = 'my_events' %}
+{% block title %}My events{% endblock %}
+{% block page_sub %}Your registrations, gate passes, attendance and certificates.{% endblock %}
+{% block page_actions %}
+  <a href="/calendar" class="btn btn-primary"><i class="fas fa-search" aria-hidden="true"></i> Discover events</a>
+  <a href="{{ calendar_feed_url() }}" class="btn btn-secondary" title="Subscribe to your events in a calendar app"><i class="fas fa-rss" aria-hidden="true"></i> Calendar feed</a>
+  <form method="POST" action="/calendar/feed/rotate" class="m-0" data-h-submit="participant/my_events:1">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-secondary" title="Reset your private calendar link"><i class="fas fa-rotate" aria-hidden="true"></i> Reset link</button>
+  </form>
+{% endblock %}
+{% block extra_css %}
+<style>
+.portal-tab-count { display: inline-block; margin-left: 4px; font-size: var(--fs-xs); background: var(--surface-muted); color: var(--text-muted); border-radius: var(--radius-pill); padding: 0 7px; }
+.nav-tabs .nav-link.active .portal-tab-count { background: var(--brand-navy-50); color: var(--brand-ink); }
+.nav-tabs .nav-link { white-space: nowrap; }
+</style>
+{% endblock %}
+{% block content %}
+  <!-- Navigation Tabs -->
+  <ul class="nav nav-tabs mb-4 flex-nowrap overflow-auto" id="eventsTab" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link {% if active_tab == 'upcoming' %}active{% endif %}" id="upcoming-tab" data-bs-toggle="pill" data-bs-target="#upcoming" type="button" role="tab">
+        <i class="fas fa-clock me-1"></i> Upcoming <span class="portal-tab-count">{{ upcoming|length }}</span>
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link {% if active_tab == 'registered' %}active{% endif %}" id="registered-tab" data-bs-toggle="pill" data-bs-target="#registered" type="button" role="tab">
+        <i class="fas fa-ticket-alt me-1"></i> Registered <span class="portal-tab-count">{{ registered|length }}</span>
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link {% if active_tab == 'waitlisted' %}active{% endif %}" id="waitlisted-tab" data-bs-toggle="pill" data-bs-target="#waitlisted" type="button" role="tab">
+        <i class="fas fa-hourglass-half me-1"></i> Waitlisted <span class="portal-tab-count">{{ waitlisted|length + (my_waitlist|selectattr("state", "equalto", "waiting")|list|length) }}</span>
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link {% if active_tab == 'attended' %}active{% endif %}" id="attended-tab" data-bs-toggle="pill" data-bs-target="#attended" type="button" role="tab">
+        <i class="fas fa-check-circle me-1"></i> Attended <span class="portal-tab-count">{{ attended|length }}</span>
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link {% if active_tab == 'certificates' %}active{% endif %}" id="certificates-tab" data-bs-toggle="pill" data-bs-target="#certificates" type="button" role="tab">
+        <i class="fas fa-certificate me-1"></i> Certificates <span class="portal-tab-count">{{ certificates|length }}</span>
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link {% if active_tab == 'cancelled' %}active{% endif %}" id="cancelled-tab" data-bs-toggle="pill" data-bs-target="#cancelled" type="button" role="tab">
+        <i class="fas fa-ban me-1"></i> Cancelled <span class="portal-tab-count">{{ cancelled|length }}</span>
+      </button>
+    </li>
+  </ul>
+
+  <!-- Tab Contents -->
+  <div class="tab-content" id="eventsTabContent">
+
+    <!-- Macro for rendering cards -->
+    {% macro render_event_cards(items, empty_msg, show_cert=False) %}
+      {% if items %}
+        <div class="row g-3">
+          {% for r in items %}
+          <div class="col-md-6 col-lg-4">
+            <div class="panel h-100 d-flex flex-column justify-content-between">
+              <div>
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                  <span class="se-badge se-badge--brand se-badge--plain">{{ r.event_category }}</span>
+                  {% if r.is_checked_in %}
+                    <span class="se-badge se-badge--success">Attended</span>
+                  {% elif r.status == 'waitlisted' %}
+                    <span class="se-badge se-badge--warning">Waitlisted</span>
+                  {% elif r.status == 'cancelled' %}
+                    <span class="se-badge se-badge--danger">Cancelled</span>
+                  {% else %}
+                    <span class="se-badge se-badge--info">Confirmed</span>
+                  {% endif %}
+                </div>
+
+                <h3 class="h6 mb-1">{{ r.event_title }}</h3>
+                <div class="text-muted small mb-2">
+                  <i class="fas fa-calendar-alt me-1" aria-hidden="true"></i> {{ r.event_date or 'TBA' }}
+                  &nbsp;·&nbsp;
+                  <i class="fas fa-map-marker-alt me-1" aria-hidden="true"></i> {{ r.event_venue }}
+                </div>
+
+                {% if r.ticket_code %}
+                <div class="p-2 mb-3 bg-light rounded text-center small border">
+                  <span class="text-muted">Ticket Pass:</span>
+                  <strong class="text-primary font-monospace ms-1">{{ r.ticket_code }}</strong>
+                </div>
+                {% endif %}
+              </div>
+
+              <div class="pt-3 border-top d-flex gap-2 flex-wrap">
+                {% if r.ticket_code %}
+                <a href="/ticket/{{ r.id }}" class="btn btn-sm btn-outline-primary flex-fill">
+                  <i class="fas fa-qrcode me-1"></i> View Ticket
+                </a>
+                {% elif r.id %}
+                <a href="/participant/badge/{{ r.id }}" class="btn btn-sm btn-outline-primary flex-fill">
+                  <i class="fas fa-id-badge me-1"></i> Digital Badge
+                </a>
+                {% endif %}
+
+                {% if show_cert or r.has_certificate %}
+                <a href="/participant/certificate/{{ r.id }}" class="btn btn-sm btn-gold flex-fill">
+                  <i class="fas fa-award me-1"></i> Certificate
+                </a>
+                {% endif %}
+
+                {% if r.google_calendar_url %}
+                <a href="{{ r.google_calendar_url }}" target="_blank" class="btn btn-sm btn-outline-secondary" title="Add to Google Calendar" aria-label="Add {{ r.event_title }} to Google Calendar">
+                  <i class="fab fa-google" aria-hidden="true"></i>
+                </a>
+                {% endif %}
+
+                <a href="{{ r.ics_url }}" class="btn btn-sm btn-outline-secondary" title="Download .ics" aria-label="Download {{ r.event_title }} as a calendar file">
+                  <i class="fas fa-calendar-plus" aria-hidden="true"></i>
+                </a>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty-state">
+          <i class="fas fa-calendar-minus" aria-hidden="true"></i>
+          <h3>{{ empty_msg }}</h3>
+          <a href="/calendar" class="btn btn-primary btn-sm">Explore the campus calendar</a>
+        </div>
+      {% endif %}
+    {% endmacro %}
+
+    <!-- 1. Upcoming -->
+    <div class="tab-pane fade {% if active_tab == 'upcoming' %}show active{% endif %}" id="upcoming" role="tabpanel">
+      {{ render_event_cards(upcoming, "No upcoming confirmed events scheduled.") }}
+    </div>
+
+    <!-- 2. Registered -->
+    <div class="tab-pane fade {% if active_tab == 'registered' %}show active{% endif %}" id="registered" role="tabpanel">
+      {{ render_event_cards(registered, "You have not registered for any events yet.") }}
+    </div>
+
+    <!-- 3. Waitlisted -->
+    <div class="tab-pane fade {% if active_tab == 'waitlisted' %}show active{% endif %}" id="waitlisted" role="tabpanel">
+      {#- UPG-236: the waitlists they (or their team) joined, and where each stands -#}
+      {% from "participant/_waitlist.html" import waitlist_cards %}
+      {% if my_waitlist %}<div class="mb-3">{{ waitlist_cards(my_waitlist) }}</div>{% endif %}
+      {% if waitlisted or not my_waitlist %}{{ render_event_cards(waitlisted, "You aren't on any waitlist. When an event is full, registering puts you on its waitlist, and it shows here.") }}{% endif %}
+    </div>
+
+    <!-- 4. Attended -->
+    <div class="tab-pane fade {% if active_tab == 'attended' %}show active{% endif %}" id="attended" role="tabpanel">
+      {{ render_event_cards(attended, "No event attendance records yet.") }}
+    </div>
+
+    <!-- 5. Certificates -->
+    <div class="tab-pane fade {% if active_tab == 'certificates' %}show active{% endif %}" id="certificates" role="tabpanel">
+      {{ render_event_cards(certificates, "No certificates issued yet.", show_cert=True) }}
+    </div>
+
+    <!-- 6. Cancelled -->
+    <div class="tab-pane fade {% if active_tab == 'cancelled' %}show active{% endif %}" id="cancelled" role="tabpanel">
+      {{ render_event_cards(cancelled, "No cancelled events or registrations.") }}
+    </div>
+
+  </div>
+{% endblock %}
+{% block extra_js %}{% include "layouts/_bootstrap_js.html" %}{% endblock %}
+{% block handler_scripts %}{{ super() }}<script src="/static/js/handlers/participant__my_events.js"></script>{% endblock %}

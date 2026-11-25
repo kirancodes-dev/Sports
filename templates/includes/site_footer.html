@@ -1,0 +1,11 @@
+{# Shared footer: the privacy notice and terms on every page (UPG-22, UPG-23).
+   `site_footer_fixed` pins it to the bottom of the screen, for pages whose body
+   centres a single card. #}
+<footer class="site-footer{% if site_footer_fixed %} site-footer--fixed{% endif %}" role="contentinfo">
+    © 2026 {{ institution().name }} ·
+    <a href="/about">About</a> ·
+    <a href="/privacy">Privacy notice</a> ·
+    <a href="/terms">Terms</a>{% if app_version() %} ·
+    <a href="/whats-new" data-app-version>What's new · {{ app_version() }}</a>{% endif %}{% if powered_by() %} ·
+    <span class="site-footer__powered">Powered by SapthaEvent</span>{% endif %}
+</footer>

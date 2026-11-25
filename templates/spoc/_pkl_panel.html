@@ -1,0 +1,281 @@
+{#- The scorer's PKL-mode raid panel (UPG-397) and the tie-breaker (UPG-396).
+    Rendered with the page and again after every tap. Needs `state`, `squads`
+    and `live` (services_live_match); `jerseys` ({side: {name: number}}, UPG-405) optional. -#}
+{% set mat = state.mat %}
+{% set sh = state.shootout %}
+{% set playing = state.phase in ('first_half', 'second_half') %}
+{% if state.phase == 'not_started' %}{% include "spoc/_before_start.html" %}{% endif %}
+{% if state.phase == 'tiebreak' and sh %}
+<section class="pkl-panel pkl-panel--shootout" data-shootout-panel data-next="{{ sh.next }}">
+  <h2 class="pkl-panel__title">Tie-breaker: {{ sh.per_team }} raids each</h2>
+  <p class="pkl-shootout__score" data-shootout-score>
+    <strong>{{ state.home.name }} {{ sh.home }}</strong> – <strong>{{ sh.away }} {{ state.away.name }}</strong>
+    <span class="pkl-shootout__raids">raids {{ sh.raids.home }}/{{ sh.per_team }} · {{ sh.raids.away }}/{{ sh.per_team }}</span>
+  </p>
+  {% if not sh.done %}
+  <p class="small mb-1">Seven defenders every raid; the baulk line counts as the bonus line. The teams raid in turn.</p>
+  <div class="pkl-row">
+    <label class="pkl-field">Raiding team
+      <select class="form-select form-select-sm" data-sh-team>
+        {% for side in ('home', 'away') %}
+        <option value="{{ side }}" {% if sh.next == side %}selected{% endif %}{% if sh.next and sh.next != side or sh.raids[side] >= sh.per_team %} disabled{% endif %}>{{ state[side].name }} ({{ sh.raids[side] }}/{{ sh.per_team }})</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="pkl-check"><input type="checkbox" data-sh-bonus> + Bonus</label>
+  </div>
+  <div class="pkl-buttons">
+    {% for n in range(1, live.MAT + 1) %}<button type="button" class="btn live-btn live-btn--raid" data-shootout data-outcome="touch" data-touches="{{ n }}">{{ n }} touch{{ '' if n == 1 else 'es' }}</button>{% endfor %}
+    <button type="button" class="btn live-btn live-btn--raid" data-shootout data-outcome="bonus">Bonus only</button>
+    <button type="button" class="btn live-btn live-btn--extra" data-shootout data-outcome="empty">Empty raid</button>
+    <button type="button" class="btn live-btn live-btn--tackle" data-shootout data-outcome="tackled">Tackled</button>
+  </div>
+  {% elif sh.level and not sh.winner %}
+  <p class="pkl-needs" data-shootout-needs>{{ sh.needs }}</p>
+  {% for way, label in (('golden', 'Golden raid won by'), ('toss', 'Coin toss won by')) %}
+  <div class="pkl-buttons">
+    {% for side in ('home', 'away') %}<button type="button" class="btn btn-outline-primary" data-decide data-way="{{ way }}" data-winner="{{ side }}">{{ label }} {{ state[side].name }}</button>{% endfor %}
+  </div>
+  {% endfor %}
+  {% else %}
+  <p class="pkl-done" data-shootout-done>{{ state[sh.winner].name }} won the {{ live.services_sports.TIEBREAK_WAYS.get(sh.decided, 'tie-breaker') }}. Tap "Full time: save the result".</p>
+  {% endif %}
+  {% if sh.lines %}<ol class="live-log__list">{% for line in sh.lines %}<li>{{ line }}</li>{% endfor %}</ol>{% endif %}
+  <p class="small text-muted mb-0">A wrong raid: Undo last. Full time pressed by mistake with no raid yet: Back to the 2nd half.</p>
+</section>
+{% elif state.mode == 'pkl' and mat %}
+{% set a = mat.raider %}
+{% set d = 'away' if a == 'home' else 'home' %}
+{% set js = jerseys if jerseys is defined else {'home': {}, 'away': {}} %}
+{% set now = state.raiding_now %}
+<section class="pkl-panel" data-pkl-panel data-raider="{{ a }}" data-named="{{ 'true' if mat.named else 'false' }}"
+         data-raiding-now="{{ now.name if now else '' }}">
+  {% if state.phase == 'not_started' %}
+  {#- Who raids first: the saved toss sets it (UPG-438); the scorer can still change it #}
+  <label class="pkl-field" data-first-raid>Who raids first{% if state.toss %} (set by the toss){% else %} (save the toss to set it){% endif %}
+    <select class="form-select form-select-sm" data-first>
+      {% for side in ('home', 'away') %}<option value="{{ side }}" {% if mat.first_raid == side %}selected{% endif %}>{{ state[side].name }}</option>{% endfor %}
+    </select>
+  </label>
+  {#- Each team's seven, tapped before the start (UPG-417) #}
+  {% if squads.home|length >= mat.mat_size and squads.away|length >= mat.mat_size %}
+  {% set saved = state.lineup %}
+  <div class="pkl-lineup" data-lineup>
+    <h3 class="pkl-panel__title">Line-ups: tap each team's {{ mat.mat_size }} who start</h3>
+    <p class="small mb-2">The others are the substitutes. {% if mat.named %}<strong data-lineup-saved>Line-ups saved.</strong> You can change them until the start.{% else %}Save both, then start the match.{% endif %}</p>
+    <div class="pkl-cols">
+      {% for side in ('home', 'away') %}
+      {% set picked = (saved[side].start|map(attribute='name')|list) if saved and saved[side] else [] %}
+      <div class="pkl-col" data-lineup-side="{{ side }}">
+        <div class="pkl-col__name">{{ state[side].name }} · <span data-lineup-count="{{ side }}">{{ picked|length }}</span>/{{ mat.mat_size }}</div>
+        <div class="pkl-chips">
+          {% for p in squads[side] %}{% set j = js[side].get(p) %}
+          <button type="button" class="pkl-player{% if p in picked %} is-picked{% endif %}" data-lineup-pick data-side="{{ side }}" data-name="{{ p }}" aria-pressed="{{ 'true' if p in picked else 'false' }}">{% if j %}<b class="pkl-player__no">#{{ j }}</b>{% endif %}<span class="pkl-player__name">{{ p }}</span></button>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <button type="button" class="btn btn-primary mt-2" data-lineup-save>Save line-ups</button>
+  </div>
+  {% endif %}
+  {% endif %}
+  {% if mat.named and playing %}
+  {#- The players by jersey number, a column per team: tap them (UPG-420), one step at a time (UPG-432) #}
+  {% set raider_tag = (('#' ~ now.jersey ~ ' ') if now and now.jersey else '') ~ (now.name if now else '') %}
+  <div class="pkl-raid-head">
+    <strong>Raid {{ mat.raid_no }}: {{ state[a].name }} raids</strong>
+    {% if mat.do_or_die %}<span class="pkl-badge pkl-badge--dod" data-do-or-die>DO-OR-DIE</span>{% endif %}
+    {% if mat.bonus_live %}<span class="pkl-badge" data-bonus-live>Bonus line live</span>{% endif %}
+    {% if mat.super_tackle_on %}<span class="pkl-badge pkl-badge--super" data-super-on>Super tackle on</span>{% endif %}
+  </div>
+  {% include "spoc/_raid_clock.html" %}
+  <div class="pkl-guide" data-guide data-raiding-team="{{ state[a].name }}" data-defending-team="{{ state[d].name }}" aria-live="polite">
+    <div class="pkl-guide__step" data-guide-step>{% if now %}Step 2 of 3{% else %}Step 1 of 3{% endif %}</div>
+    <div class="pkl-guide__text" data-guide-text>{% if now %}Did <strong>{{ raider_tag }}</strong> touch anyone? Tap each <strong>{{ state[d].name }}</strong> player he touched, or the ones who caught him (the first one tapped made the catch). Nobody? Tap Empty raid under {{ state[a].name }}.{% else %}Who is raiding? Tap the <strong>{{ state[a].name }}</strong> player who goes in (blue side).{% endif %}</div>
+    <div class="pkl-guide__summary" data-raid-summary>This raid: {% if now %}<strong>{{ raider_tag }}</strong> raiding{% else %}no raider yet{% endif %}</div>
+  </div>
+  <div class="pkl-cols">
+    {% for side in ('home', 'away') %}
+    {% set team = mat.players[side] %}
+    <div class="pkl-col pkl-col--{{ 'raiding' if side == a else 'defending' }}" data-col="{{ side }}">
+      <div class="pkl-col__head">{#- the name and, beside it, the time-outs (UPG-471) #}
+        <div class="pkl-col__name">{{ state[side].name }} <span class="pkl-badge">{{ 'Raiding' if side == a else 'Defending' }}</span>
+          <span class="pkl-col__count"><span data-on="{{ side }}">{{ mat.on[side] }}</span> on the mat · {{ 'tap the raider' if side == a else 'tap who he touched' }}</span></div>
+        {% include "spoc/_pkl_timeouts.html" %}
+      </div>
+      <div class="pkl-chips pkl-chips--mat">
+        {% for p in team.on %}
+        <button type="button" class="pkl-player{% if side == a and now and now.name == p.name %} is-picked{% endif %}" data-mat-player data-side="{{ side }}" data-name="{{ p.name }}" data-role="{{ 'raider' if side == a else 'defender' }}">{% if p.jersey %}<b class="pkl-player__no">#{{ p.jersey }}</b>{% endif %}<span class="pkl-player__name">{{ p.name }}</span></button>
+        {% endfor %}
+      </div>
+      {#- The most-used scores beside each team (UPG-466): the rest stay below #}
+      <div class="pkl-quick" data-quick="{{ side }}">
+        {% if side == a %}
+        <button type="button" class="btn live-btn live-btn--raid pkl-quick__btn" data-raid data-outcome="touch" data-touch-button disabled>Touch points: tap the defenders</button>
+        <button type="button" class="btn pkl-bonus-btn pkl-quick__btn" data-bonus-toggle="given" data-pkl-bonus aria-pressed="false"{% if not mat.bonus_live %} disabled title="Not live: under 6 defenders"{% endif %}>+ Bonus</button>
+        {% if mat.bonus_live %}<button type="button" class="btn live-btn live-btn--raid pkl-quick__btn" data-raid data-outcome="bonus">Bonus only +1<small class="pkl-hint">touched nobody</small></button>{% endif %}
+        <button type="button" class="btn live-btn live-btn--extra pkl-quick__btn" data-raid data-outcome="empty">{% if mat.do_or_die %}Empty: raider out<small class="pkl-hint">do-or-die · +1 to {{ state[d].name }}</small>{% else %}Empty raid<small class="pkl-hint">no point, nobody out</small>{% endif %}</button>
+        <button type="button" class="btn pkl-bonus-btn pkl-bonus-btn--missed pkl-quick__btn" data-bonus-toggle="missed" data-pkl-bonus-missed aria-pressed="false"{% if not mat.bonus_live %} disabled{% endif %}>Bonus tried, not given</button>
+        {% else %}
+        <button type="button" class="btn live-btn live-btn--tackle pkl-quick__btn" data-raid data-outcome="tackled">{% if mat.super_tackle_on %}Super tackle +2{% else %}Tackled +1{% endif %}<small class="pkl-hint">raider out · tap the tackler first</small></button>
+        <button type="button" class="btn live-btn live-btn--extra pkl-quick__btn" data-raid data-outcome="line_out">Raider out of court +1<small class="pkl-hint">raider out</small></button>
+        <button type="button" class="btn live-btn live-btn--extra pkl-quick__btn" data-raid data-outcome="time_over">Raid time over +1<small class="pkl-hint">not back in {{ state.raid_seconds }} s · raider out</small></button>
+        {% endif %}
+        <button type="button" class="btn btn-outline-primary pkl-quick__btn" data-call data-kind="technical" data-team="{{ side }}">Technical +1</button>
+      </div>
+      {% if team.out %}
+      <div class="pkl-row-label">Out · back in this order</div>
+      <div class="pkl-chips pkl-chips--small" data-out="{{ side }}">
+        {% for p in team.out %}<button type="button" class="pkl-player pkl-player--out" data-mat-player data-side="{{ side }}" data-name="{{ p.name }}" data-role="out">{% if p.jersey %}<b class="pkl-player__no">#{{ p.jersey }}</b>{% endif %}<span class="pkl-player__name">{{ p.name }}</span></button>{% endfor %}
+      </div>
+      {% endif %}
+      {% if team.carded %}
+      <div class="pkl-row-label">Off · card</div>
+      <div class="pkl-chips pkl-chips--small" data-carded="{{ side }}">
+        {% for p in team.carded %}<button type="button" class="pkl-player pkl-player--card pkl-player--{{ p.card }}" data-mat-player data-side="{{ side }}" data-name="{{ p.name }}" data-role="carded" data-card="{{ p.card }}">{% if p.jersey %}<b class="pkl-player__no">#{{ p.jersey }}</b>{% endif %}<span class="pkl-player__name">{{ p.name }}</span><small class="pkl-player__left">{% if p.left is not none %}{{ '%d:%02d' % (p.left // 60, p.left % 60) }} left{% else %}red card{% endif %}</small></button>{% endfor %}
+      </div>
+      {% endif %}
+      {% if team.bench %}
+      <div class="pkl-row-label">Substitutes</div>
+      <div class="pkl-chips pkl-chips--small" data-bench-list="{{ side }}">
+        {% for p in team.bench %}<button type="button" class="pkl-player pkl-player--bench" data-bench data-side="{{ side }}" data-name="{{ p.name }}">{% if p.jersey %}<b class="pkl-player__no">#{{ p.jersey }}</b>{% endif %}<span class="pkl-player__name">{{ p.name }}</span></button>{% endfor %}
+      </div>
+      {% endif %}
+      <div class="pkl-row-label">Other for {{ state[side].name }}</div>
+      <div class="pkl-col__tools">
+        {% if team.bench %}<button type="button" class="btn btn-sm btn-outline-secondary" data-tool="sub" data-side="{{ side }}">Substitution</button>{% endif %}
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-tool="out_of_bounds" data-side="{{ side }}" title="A player of this team stepped out: the other team +1">Out of bounds</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-tool="lobby" data-side="{{ side }}" title="A player went into the lobby before a struggle: out, the other team +1">Lobby</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-tool="mat_off" data-side="{{ side }}"{% if mat.on[side] <= 1 %} disabled{% endif %}>−1 on the mat</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-tool="injury" data-side="{{ side }}" title="Stops the clock; no time-out is used">Injury</button>
+      </div>
+      <div class="pkl-col__tools pkl-col__tools--cards">
+        {% for c, label in live.CARDS.items() %}<button type="button" class="btn btn-sm pkl-card-btn pkl-card-btn--{{ c }}" data-tool="card_{{ c }}" data-side="{{ side }}">{{ label }}</button>{% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {#- The raid's end buttons are in each team's quick row (UPG-466); the old Step 3 list below them went (UPG-468) #}
+  {% elif mat.named and state.phase == 'half_time' %}
+  {#- Substitutions at half time (UPG-404) #}
+  <div class="pkl-cols">
+    {% for side in ('home', 'away') %}{% set team = mat.players[side] %}
+    <div class="pkl-col" data-col="{{ side }}">
+      <div class="pkl-col__name">{{ state[side].name }}</div>
+      <div class="pkl-chips pkl-chips--small">{% for p in team.on + team.out %}<button type="button" class="pkl-player{% if p in team.out %} pkl-player--out{% endif %}" data-mat-player data-side="{{ side }}" data-name="{{ p.name }}" data-role="out">{% if p.jersey %}<b class="pkl-player__no">#{{ p.jersey }}</b>{% endif %}<span class="pkl-player__name">{{ p.name }}</span></button>{% endfor %}</div>
+      {% if team.bench %}
+      <div class="pkl-row-label">Substitutes</div>
+      <div class="pkl-chips pkl-chips--small">{% for p in team.bench %}<button type="button" class="pkl-player pkl-player--bench" data-bench data-side="{{ side }}" data-name="{{ p.name }}">{% if p.jersey %}<b class="pkl-player__no">#{{ p.jersey }}</b>{% endif %}<span class="pkl-player__name">{{ p.name }}</span></button>{% endfor %}</div>
+      <button type="button" class="btn btn-sm btn-outline-secondary mt-1" data-tool="sub" data-side="{{ side }}">Substitution</button>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% elif not mat.named %}
+  <div class="pkl-mat" aria-label="Players on the mat">
+    {% for side in ('home', 'away') %}
+    <div class="pkl-mat__team{% if side == a %} pkl-mat__team--raiding{% endif %}" data-mat="{{ side }}">
+      <div class="pkl-mat__name">{{ state[side].name }}{% if side == a and playing %} <span class="pkl-badge">raiding</span>{% endif %}</div>
+      <div class="pkl-mat__dots" aria-label="{{ mat.on[side] }} of {{ mat.mat_size }} on the mat">{% for i in range(mat.mat_size) %}<span class="pkl-dot{% if i < mat.on[side] %} pkl-dot--on{% endif %}"></span>{% endfor %}</div>
+      <div class="pkl-mat__meta"><span data-on="{{ side }}">{{ mat.on[side] }}</span> on the mat · time-outs left {{ mat.timeouts_left[side] }} · empty raids {{ mat.empty[side] }}{% if mat.all_outs[side] %} · all outs {{ mat.all_outs[side] }}{% endif %}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% if playing %}
+  <div class="pkl-raid-head">
+    <strong>Raid {{ mat.raid_no }}: {{ state[a].name }}</strong>
+    {% if mat.do_or_die %}<span class="pkl-badge pkl-badge--dod" data-do-or-die>DO-OR-DIE</span>{% endif %}
+    {% if mat.bonus_live %}<span class="pkl-badge" data-bonus-live>Bonus line live</span>{% endif %}
+    {% if mat.super_tackle_on %}<span class="pkl-badge pkl-badge--super" data-super-on>Super tackle on</span>{% endif %}
+  </div>
+  {% include "spoc/_raid_clock.html" %}
+  <div class="pkl-row">
+    {% if squads[a] %}
+    <label class="pkl-field">Raider (optional)
+      <select class="form-select form-select-sm" data-pkl-raider>
+        <option value="">Not recorded</option>
+        {% for p in squads[a] %}{% set j = js[a].get(p) %}<option value="{{ p }}">{% if j %}#{{ j }} {% endif %}{{ p }}</option>{% endfor %}
+      </select>
+    </label>
+    {% endif %}
+    {% set bonus_hint = false %}{% include "spoc/_pkl_bonus.html" %}
+  </div>
+  <div class="pkl-buttons">
+    {% for n in range(1, mat.on[d] + 1) %}<button type="button" class="btn live-btn live-btn--raid" data-raid data-outcome="touch" data-touches="{{ n }}">{{ n }} touch{{ '' if n == 1 else 'es' }}{% if n == mat.on[d] %} · all out{% endif %}</button>{% endfor %}
+    {% if mat.bonus_live %}<button type="button" class="btn live-btn live-btn--raid" data-raid data-outcome="bonus">Bonus only +1</button>{% endif %}
+    <button type="button" class="btn live-btn live-btn--extra" data-raid data-outcome="empty">{% if mat.do_or_die %}Empty: raider out, +1 to {{ state[d].name }}{% else %}Empty raid{% endif %}</button>
+    <button type="button" class="btn live-btn live-btn--tackle" data-raid data-outcome="tackled">{% if mat.super_tackle_on %}Super tackle +2{% else %}Tackled +1{% endif %}</button>
+    <button type="button" class="btn live-btn live-btn--extra" data-raid data-outcome="line_out">Raider out of court</button>
+    <button type="button" class="btn live-btn live-btn--extra" data-raid data-outcome="time_over">Raid time over</button>
+  </div>
+  {% if squads[d] %}
+  <label class="pkl-field">Caught by (optional, with Tackled)
+    <select class="form-select form-select-sm" data-pkl-tackler>
+      <option value="">Not recorded</option>
+      {% for p in squads[d] %}{% set j = js[d].get(p) %}<option value="{{ p }}">{% if j %}#{{ j }} {% endif %}{{ p }}</option>{% endfor %}
+    </select>
+  </label>
+  {% endif %}
+  {% endif %}
+  {% endif %}
+  {% if playing %}
+  <details class="pkl-calls">
+    <summary>Calls: technical point, time-out, injury, review{% if not mat.named %}, out of bounds, lobby, cards, players on the mat{% endif %}</summary>
+    <div class="pkl-calls__teams">
+      {% for side in ('home', 'away') %}
+      <div class="pkl-calls__team">
+        <h3 class="live-group__title">{{ state[side].name }}</h3>
+        <div class="pkl-buttons">
+          <button type="button" class="btn btn-sm btn-outline-primary" data-call data-kind="technical" data-team="{{ side }}">Technical point +1</button>
+          {% if not mat.named %}<button type="button" class="btn btn-sm btn-outline-secondary" data-call data-kind="out_of_bounds" data-team="{{ side }}" title="A defender of this team stepped out: the other team +1">Their player out of bounds</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-call data-kind="out_of_bounds" data-where="lobby" data-team="{{ side }}" title="A player of this team went into the lobby before a struggle: the other team +1">Their player into the lobby</button>{% endif %}
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-call data-kind="stoppage" data-reason="injury" data-team="{{ side }}" title="Stops the clock; no time-out is used">Injury break</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-call data-kind="timeout" data-team="{{ side }}"{% if not mat.timeouts_left[side] %} disabled{% endif %}>Time-out ({{ mat.timeouts_left[side] }} left)</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-call data-kind="review" data-team="{{ side }}" data-upheld="1">Review upheld</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-call data-kind="review" data-team="{{ side }}" data-upheld="0">Review not upheld</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-call data-kind="mat" data-team="{{ side }}" data-change="1"{% if mat.on[side] >= mat.mat_size %} disabled{% endif %}>+1 on the mat</button>
+          {% if not mat.named %}<button type="button" class="btn btn-sm btn-outline-secondary" data-call data-kind="mat" data-team="{{ side }}" data-change="-1"{% if mat.on[side] <= 1 %} disabled{% endif %}>−1 on the mat</button>{% endif %}
+        </div>
+        {#- Why the technical point (UPG-450): one tap gives it with its reason #}
+        <div class="pkl-tech" data-tech-reasons="{{ side }}">
+          <span class="pkl-tech__label">Technical point +1 for:</span>
+          {% for k, v in live.TECH_REASONS.items() %}<button type="button" class="btn btn-sm btn-outline-primary" data-call data-kind="technical" data-reason="{{ k }}" data-team="{{ side }}">{{ v|capitalize }}</button>{% endfor %}
+        </div>
+        {% if not mat.named %}
+        <div class="pkl-buttons pkl-cards" data-card-row="{{ side }}">
+          {% if squads[side] %}<select class="form-select form-select-sm" data-card-player="{{ side }}" aria-label="Who gets the card">
+            <option value="">Player (optional)</option>
+            {% for p in squads[side] %}{% set j = js[side].get(p) %}<option value="{{ p }}">{% if j %}#{{ j }} {% endif %}{{ p }}</option>{% endfor %}
+          </select>{% endif %}
+          {% for c, label in live.CARDS.items() %}<button type="button" class="btn btn-sm pkl-card-btn pkl-card-btn--{{ c }}" data-call data-kind="card" data-card="{{ c }}" data-team="{{ side }}">{{ label }}</button>{% endfor %}
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    <button type="button" class="btn btn-sm btn-outline-dark mt-2" data-call data-kind="turn">Other team raids (the referee says so)</button>
+    <button type="button" class="btn btn-sm btn-outline-dark mt-2" data-call data-kind="stoppage" data-reason="official">Official time-out</button>
+    <p class="small text-muted mb-0 mt-1">A review that changes the call: remove that raid below and enter it again. A time-out, an injury break or an official time-out stops the clock; Resume clock starts it. A card gives no point: add a technical point if the referee gives one.{% if mat.named %} +1 on the mat brings back the first player out.{% endif %}</p>
+  </details>
+  {% endif %}
+</section>
+{% endif %}
+{#- The player of the match, named at full time; the scorer can tap another (UPG-422) #}
+{% if state.phase == 'full_time' and (squads.home or squads.away) %}
+{% set pj = jerseys if jerseys is defined else {'home': {}, 'away': {}} %}
+{% set pm = state.potm %}
+<section class="pkl-panel" data-potm>
+  <h2 class="pkl-panel__title">Player of the match</h2>
+  <p class="mb-1" data-potm-now>{% if pm %}<strong>{{ pm.tag }}</strong> · {{ pm.team_name }} · {{ pm.points }} point{{ '' if pm.points == 1 else 's' }} (raid {{ pm.raid }}, tackle {{ pm.tackle }}){% if not pm.chosen %} · the most points{% endif %}{% else %}Nobody yet: no points named a player.{% endif %}</p>
+  <p class="small text-muted mb-2">To name someone else, tap him.</p>
+  <div class="pkl-cols">
+    {% for side in ('home', 'away') %}
+    <div class="pkl-col">
+      <div class="pkl-col__name">{{ state[side].name }}</div>
+      <div class="pkl-chips">{% for p in squads[side] %}{% set j = pj[side].get(p) %}<button type="button" class="pkl-player{% if pm and pm.team == side and pm.name == p %} is-picked{% endif %}" data-potm-pick data-side="{{ side }}" data-name="{{ p }}">{% if j %}<b class="pkl-player__no">#{{ j }}</b>{% endif %}<span class="pkl-player__name">{{ p }}</span></button>{% endfor %}</div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}

@@ -1,0 +1,367 @@
+{% extends "base_classic.html" %}
+{#- On the app layout and portal design system (UPG-63). -#}
+{% block csrf_meta %}<meta name="csrf-token" content="{{ csrf_token() }}">{% endblock %}
+{% block title %}Round {{ cur_round }} of {{ round_info.total }} — {{ event.title }}{% endblock %}
+{% block page_title %}Round {{ cur_round }} of {{ round_info.total }}{% if round_info.is_final and round_info.multi %} · Final{% endif %}{% endblock %}
+{% block page_sub %}{{ event.title }} · {{ leaderboard | length }} active participants · {{ leaderboard | selectattr('score') | list | length }} scored{% if scoring_locked %} · <span class="se-badge se-badge--warning"><i class="fas fa-lock" aria-hidden="true"></i> Scoring locked</span>{% endif %}{% endblock %}
+{% block page_actions %}<a href="/spoc/room_allocation/{{ event.id }}" class="btn btn-secondary"><i class="fas fa-door-open" aria-hidden="true"></i> Rooms</a><a href="/spoc/dashboard" class="btn btn-secondary"><i class="fas fa-arrow-left" aria-hidden="true"></i> Console</a>{% endblock %}
+{% block extra_css %}
+<style>
+h1,h2,h3,h4,h5,h6{font-family: var(--font-heading);}
+.card{background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:20px 24px;margin-bottom:20px;}
+.section-title{font-family: var(--font-heading);font-size:13px;font-weight:700;color: var(--brand-ink);text-transform:uppercase;letter-spacing:.5px;margin-bottom:14px;display:flex;align-items:center;gap:8px;}
+.lock-banner{border-radius:12px;padding:14px 20px;display:flex;align-items:center;gap:12px;margin-bottom:20px;font-size:14px;font-weight:600;}
+.lock-on{background:#fef9c3;border:1.5px solid #fde047;color:#854d0e;}
+.lock-off{background:#f0fdf4;border:1.5px solid #86efac;color:#166534;}
+.board-table{width:100%;border-collapse:collapse;font-size:13px;}
+.board-table thead th{background:var(--brand-navy);color:#fff;font-weight:600;padding:10px 14px;white-space:nowrap;font-family: var(--font-heading);font-size:11.5px;letter-spacing:.3px;}
+.board-table tbody tr{border-bottom:1px solid #f1f5f9;transition:.15s;}
+.board-table tbody tr:hover{background:#f8faff;}
+.board-table td{padding:10px 14px;vertical-align:middle;}
+.rank-badge{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;font-size:12px;font-weight:800;font-family: var(--font-heading);}
+.rank-1{background:#fde68a;color:#78350f;}
+.rank-2{background:#e2e8f0;color:#334155;}
+.rank-3{background:#fed7aa;color:#7c2d12;}
+.rank-n{background:#f1f5f9;color:#64748b;}
+.score-pill{display:inline-block;background:#dbeafe;color:#1e40af;font-weight:700;font-size:12px;padding:3px 10px;border-radius:100px;}
+.no-score{color:#94a3b8;font-size:12px;font-style:italic;}
+.room-chip{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;background:#f0fdf4;color:#15803d;border:1px solid #86efac;padding:2px 8px;border-radius:100px;font-weight:600;}
+.att-present{color:#15803d;font-size:11.5px;font-weight:600;}
+.att-pending{color:#94a3b8;font-size:11.5px;}
+.advance-card{background:#fff;border-radius:14px;border:2px solid #e2e8f0;padding:22px 24px;margin-bottom:20px;}
+.advance-card.danger{border-color:#fca5a5;}
+.mode-tab{border:1.5px solid #e2e8f0;border-radius:9px;padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer;transition:.15s;background:#f8fafc;color:#64748b;}
+.mode-tab.active{background:var(--brand-navy);color:#fff;border-color:var(--brand-navy);}
+.btn-action{display:inline-flex;align-items:center;gap:7px;padding:9px 18px;border-radius:9px;font-size:13px;font-weight:600;border:none;cursor:pointer;text-decoration:none;transition:.15s;}
+.btn-blue{background:var(--brand-navy);color:#fff;}
+.btn-blue:hover{background:#141d42;color:#fff;}
+.btn-green{background:#15803d;color:#fff;}
+.btn-green:hover{background:#166534;color:#fff;}
+.btn-red{background:#dc2626;color:#fff;}
+.btn-red:hover{background:#b91c1c;color:#fff;}
+.btn-amber{background:#d97706;color:#fff;}
+.btn-amber:hover{background:#b45309;color:#fff;}
+.btn-outline{background:#fff;border:1.5px solid #e2e8f0;color:#475569;}
+.btn-outline:hover{background:var(--brand-navy);color:#fff;border-color:var(--brand-navy);}
+.stat-pill{background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;padding:12px 16px;text-align:center;}
+.stat-val{font-family: var(--font-heading);font-size:22px;font-weight:800;color: var(--brand-ink);}
+.stat-label{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.4px;}
+</style>
+{% endblock %}
+{% block content %}
+
+
+<div>
+
+<!-- Flash messages -->
+
+
+<!-- LOCK BANNER -->
+<div class="lock-banner {{ 'lock-on' if scoring_locked else 'lock-off' }}">
+  <i class="fas fa-{{ 'lock' if scoring_locked else 'lock-open' }} fa-lg"></i>
+  <div style="flex:1;">
+    {% if scoring_locked %}
+    Scoring is <strong>LOCKED</strong> — judges cannot submit or edit scores for Round {{ cur_round }}.
+    {% else %}
+    Scoring is <strong>OPEN</strong> — judges can score participants for Round {{ cur_round }}.
+    {% endif %}
+  </div>
+  <form method="POST" action="/spoc/lock_scoring/{{ event.id }}" style="display:inline;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn-action {{ 'btn-green' if scoring_locked else 'btn-amber' }}" style="font-size:12px;padding:7px 14px;">
+      <i class="fas fa-{{ 'lock-open' if scoring_locked else 'lock' }}"></i>
+      {{ 'Unlock Scoring' if scoring_locked else 'Lock Scoring' }}
+    </button>
+  </form>
+</div>
+
+<!-- STATS -->
+{% set scored_count = leaderboard | selectattr('score') | list | length %}
+{% set present_count = leaderboard | selectattr('attendance','equalto','Present') | list | length %}
+<div class="row g-3 mb-3">
+  <div class="col-6 col-md-3">
+    <div class="stat-pill">
+      <div class="stat-val">{{ leaderboard | length }}</div>
+      <div class="stat-label">Active</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-pill">
+      <div class="stat-val" style="color:#15803d;">{{ scored_count }}</div>
+      <div class="stat-label">Scored</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-pill">
+      <div class="stat-val" style="color:#0891b2;">{{ present_count }}</div>
+      <div class="stat-label">Present</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-pill">
+      <div class="stat-val" style="color:var(--brand-gold);">{{ cur_round }} / {{ round_info.total }}</div>
+      <div class="stat-label">Round</div>
+    </div>
+  </div>
+</div>
+
+<!-- LEADERBOARD TABLE -->
+<div class="card" style="padding:0;overflow:hidden;">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #f1f5f9;">
+    <div class="section-title mb-0"><i class="fas fa-trophy" style="color:var(--brand-gold);"></i>Round {{ cur_round }} Standings</div>
+    <div style="font-size:12px;color:#94a3b8;">Auto-ranked by average judge score</div>
+  </div>
+  <div style="overflow-x:auto;">
+    <table class="board-table">
+      <thead>
+        <tr>
+          <th>Rank</th>
+          <th>Team / Name</th>
+          <th>Room</th>
+          <th>Avg Score</th>
+          <th>Judges</th>
+          <th>Attendance</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in leaderboard %}
+        <tr>
+          <td>
+            <span class="rank-badge {{ 'rank-1' if row.rank==1 else ('rank-2' if row.rank==2 else ('rank-3' if row.rank==3 else 'rank-n')) }}">
+              {{ row.rank }}
+            </span>
+          </td>
+          <td>
+            <div style="font-weight:600;color: var(--brand-ink);">{{ row.team_name }}</div>
+            {% if row.lead_name != row.team_name %}
+            <div style="font-size:11.5px;color:#94a3b8;">{{ row.lead_name }}</div>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.assigned_room and row.assigned_room != '—' and row.assigned_room != None %}
+            <span class="room-chip"><i class="fas fa-door-open"></i> {{ row.assigned_room }}</span>
+            {% else %}
+            <span style="color:#94a3b8;font-size:11.5px;">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.score is not none %}
+            <span class="score-pill">{{ row.score }}</span>
+            {% else %}
+            <span class="no-score">Not scored</span>
+            {% endif %}
+            {#- Each judge's mark; the SPOC changes it until the results are out (UPG-336, UPG-337) #}
+            {% for m in row.marks %}
+            <form method="POST" action="/spoc/hackathon/{{ event.id }}/judge_mark/{{ row.id }}" class="d-flex flex-wrap gap-1 align-items-center mt-1" data-judge-mark="{{ m.judge }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="judge" value="{{ m.judge }}">
+              <input type="hidden" name="back" value="round">
+              <span style="font-size:11.5px;color:#64748b;">{{ m.name }}</span>
+              {% if event.results_published %}<strong style="font-size:12px;">{{ m.score }}</strong>
+              {% else %}<input class="form-control form-control-sm" style="width:70px" type="number" min="0" step="0.1" name="score" value="{{ m.score }}" aria-label="{{ m.name }}'s mark for {{ row.team_name }}">
+              <button class="btn btn-sm btn-outline-primary" type="submit">Save</button>{% endif %}
+              {% if m.edited %}<span class="se-badge se-badge--warning">edited (was {{ m.was }})</span>{% endif %}
+            </form>
+            {% endfor %}
+          </td>
+          <td style="color:#64748b;font-size:12.5px;">{{ row.judge_count }} judge{{ 's' if row.judge_count != 1 }}</td>
+          <td>
+            <span class="{{ 'att-present' if row.attendance == 'Present' else 'att-pending' }}">
+              <i class="fas fa-{{ 'check-circle' if row.attendance == 'Present' else 'clock' }} me-1"></i>
+              {{ row.attendance }}
+            </span>
+          </td>
+        </tr>
+        {% endfor %}
+        {% if not leaderboard %}
+        <tr><td colspan="6" style="text-align:center;padding:48px;color:#94a3b8;">
+          <i class="fas fa-users fa-2x d-block mb-3"></i>No active participants for Round {{ cur_round }}.
+        </td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ADVANCE ROUND CARD (UPG-149: one rule, history kept, never past the final round) -->
+{% set unscored_present = leaderboard | selectattr('score', 'none') | selectattr('attendance', 'equalto', 'Present') | list | length %}
+{% if round_info.is_final %}
+<div class="advance-card" id="final-round">
+  <div class="section-title"><i class="fas fa-flag-checkered" style="color:var(--brand-gold);"></i>{% if round_info.multi %}Final round{% else %}One-round event{% endif %}</div>
+  <p style="font-size:13px;color:#475569;margin-bottom:14px;">
+    {% if round_info.multi %}Round {{ cur_round }} is the last of {{ round_info.total }} rounds. {% endif %}When the judges have scored, publish the results: the ranking uses this round's scores.
+  </p>
+  <a href="/spoc/results/{{ event.id }}" class="btn-action btn-blue"><i class="fas fa-trophy"></i> Go to results</a>
+</div>
+{% elif scored_count > 0 %}
+<div class="advance-card">
+  <div class="section-title"><i class="fas fa-arrow-circle-right" style="color:#15803d;"></i>Advance to Round {{ cur_round + 1 }} of {{ round_info.total }}</div>
+  <p style="font-size:13px;color:#475569;margin-bottom:18px;">
+    Select how teams go through. Teams tied at the cut all go through. This round's scores are kept in the round history,
+    and judges start the next round with a clean sheet. Every team is emailed its result.
+  </p>
+
+  <div class="d-flex gap-2 mb-4" id="modeTabs">
+    <button class="mode-tab active" data-h-click="spoc/round_panel:2">
+      <i class="fas fa-list-ol me-1"></i> Top N
+    </button>
+    <button class="mode-tab" data-h-click="spoc/round_panel:3">
+      <i class="fas fa-filter me-1"></i> Score Cutoff
+    </button>
+  </div>
+
+  <form method="POST" action="/spoc/advance_round/{{ event.id }}"
+        data-h-submit="spoc/round_panel:4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="mode" id="modeInput" value="top_n">
+    <input type="hidden" name="round" value="{{ cur_round }}">
+
+    <!-- TOP N panel -->
+    <div id="panel_top_n">
+      <label style="font-size:12.5px;font-weight:600;color:#374151;display:block;margin-bottom:6px;">
+        Advance Top N participants
+      </label>
+      <div class="d-flex align-items-center gap-3">
+        <input aria-label="Advance Top N participants" type="number" name="top_n" id="topNInput" value="{{ [scored_count // 2, 1]|max }}"
+               min="1" max="{{ scored_count }}"
+               style="width:120px;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-weight:700;outline:none;"
+               data-h-focus="spoc/round_panel:5" data-h-blur="spoc/round_panel:6">
+        <span style="font-size:13px;color:#64748b;">of {{ scored_count }} scored participants</span>
+      </div>
+      <p style="font-size:12px;color:#94a3b8;margin-top:8px;">e.g. enter 10 to advance the top 10 scorers</p>
+    </div>
+
+    <!-- CUTOFF panel -->
+    <div id="panel_cutoff" style="display:none;">
+      <label style="font-size:12.5px;font-weight:600;color:#374151;display:block;margin-bottom:6px;">
+        Advance everyone with score &ge; cutoff
+      </label>
+      <div class="d-flex align-items-center gap-3">
+        <input aria-label="Advance everyone with score ≥ cutoff" type="number" name="cutoff" id="cutoffInput" value="50" min="0" max="100" step="0.1"
+               style="width:120px;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-weight:700;outline:none;"
+               data-h-focus="spoc/round_panel:7" data-h-blur="spoc/round_panel:8">
+        <span style="font-size:13px;color:#64748b;">points (average across judges)</span>
+      </div>
+      <p style="font-size:12px;color:#94a3b8;margin-top:8px;">
+        Preview:
+        <strong id="cutoffPreview" style="color: var(--brand-ink);">—</strong> participants would advance
+      </p>
+    </div>
+
+    {% if unscored_present %}
+    <div class="form-check mt-3">
+      <input class="form-check-input" type="checkbox" name="eliminate_unscored" value="yes" id="eliminateUnscored">
+      <label class="form-check-label" for="eliminateUnscored" style="font-size:13px;">
+        {{ unscored_present }} present team{{ 's' if unscored_present != 1 }} {{ 'have' if unscored_present != 1 else 'has' }} no score yet. Eliminate {{ 'them' if unscored_present != 1 else 'it' }} and advance anyway.
+      </label>
+    </div>
+    {% endif %}
+
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid #f1f5f9;display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+      <button type="submit" class="btn-action btn-green">
+        <i class="fas fa-arrow-circle-right"></i> Advance to Round {{ cur_round + 1 }}
+      </button>
+      <span style="font-size:12px;color:#94a3b8;">
+        Teams that go through and teams that don't are both emailed. Absent, unscored teams are marked absent.
+      </span>
+    </div>
+  </form>
+</div>
+{% else %}
+<div style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:12px;padding:18px 20px;margin-bottom:20px;">
+  <i class="fas fa-exclamation-triangle me-2" style="color:#d97706;"></i>
+  <strong style="color:#92400e;">No scored participants yet.</strong>
+  <span style="color:#78350f;font-size:13px;"> Judges must score participants before you can advance the round.</span>
+</div>
+{% endif %}
+
+<!-- EARLIER ROUNDS (UPG-149: kept in each team's round history) -->
+{% if past_rounds %}
+<div class="card" id="past-rounds">
+  <div class="section-title"><i class="fas fa-history" style="color:var(--brand-navy);"></i>Earlier rounds</div>
+  {% for r in past_rounds %}
+  <div class="mb-3">
+    <div style="font-weight:700;color:var(--brand-ink);font-size:14px;">Round {{ r.round }}</div>
+    <div style="font-size:12.5px;color:#64748b;margin-bottom:6px;">{{ r.qualified }} went through · {{ r.eliminated }} didn't{% if r.absent %} · {{ r.absent }} absent{% endif %}</div>
+    <div style="overflow-x:auto;">
+      <table class="board-table">
+        <thead><tr><th>Team</th><th>Score</th><th>Result</th></tr></thead>
+        <tbody>
+          {% for row in r.top %}
+          <tr><td>{{ row.team }}</td><td>{{ row.score if row.score is not none else '—' }}</td>
+              <td>{{ {'qualified': 'Went through', 'absent': 'Absent'}.get(row.result, 'Not qualified') }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Who sees the leaderboard (UPG-300) -->
+<div class="mb-3">{% with back='rounds' %}{% include 'includes/leaderboard_switch.html' %}{% endwith %}</div>
+
+<!-- QUICK LINKS -->
+<div class="d-flex flex-wrap gap-2">
+  <a href="/spoc/room_allocation/{{ event.id }}" class="btn-action btn-outline">
+    <i class="fas fa-door-open"></i> Room Allocation
+  </a>
+  <a href="/spoc/results/{{ event.id }}" class="btn-action btn-outline">
+    <i class="fas fa-trophy"></i> Full Results
+  </a>
+  <a href="/live/{{ event.id }}" target="_blank" class="btn-action btn-outline">
+    <i class="fas fa-broadcast-tower"></i> Live Leaderboard
+  </a>
+  <a href="/spoc/dashboard" class="btn-action btn-outline">
+    <i class="fas fa-arrow-left"></i> Dashboard
+  </a>
+</div>
+
+</div><!-- /container -->
+
+{% include "layouts/_bootstrap_js.html" %}
+<script nonce="{{ csp_nonce() }}">
+// Score data for cutoff preview
+const scores = {{ leaderboard | map(attribute='score') | select | list | tojson }};
+
+function switchMode(mode, btn) {
+  document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('modeInput').value = mode;
+  document.getElementById('panel_top_n').style.display   = (mode === 'top_n')  ? '' : 'none';
+  document.getElementById('panel_cutoff').style.display  = (mode === 'cutoff') ? '' : 'none';
+}
+
+// The advance panel is only there once something is scored (UPG-60)
+const cutoffInput = document.getElementById('cutoffInput');
+if (cutoffInput) cutoffInput.addEventListener('input', function() {
+  const cut = parseFloat(this.value) || 0;
+  const count = scores.filter(s => s >= cut).length;
+  document.getElementById('cutoffPreview').textContent = count;
+});
+
+function confirmAdvance() {
+  const mode = document.getElementById('modeInput').value;
+  let detail;
+  if (mode === 'top_n') {
+    const n = parseInt(document.getElementById('topNInput').value) || 0;
+    detail = `Top ${n} participant(s)`;
+  } else {
+    const c = parseFloat(document.getElementById('cutoffInput').value) || 0;
+    const count = scores.filter(s => s >= c).length;
+    detail = `${count} participant(s) with score ≥ ${c}`;
+  }
+  return confirm(
+    `Advance Round {{ cur_round }} → Round {{ cur_round + 1 }}?\n\n` +
+    `Advancing: ${detail}\n\n` +
+    `• Every team is emailed its result\n` +
+    `• Round {{ cur_round }} scores are kept in the round history\n` +
+    `• Teams that don't go through are eliminated\n\n` +
+    `This cannot be undone.`
+  );
+}
+</script>
+{% endblock %}
+{% block handler_scripts %}{{ super() }}<script src="/static/js/handlers/spoc__round_panel.js"></script>
+{% endblock %}

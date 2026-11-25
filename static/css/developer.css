@@ -1,0 +1,223 @@
+/* ============================================================
+   SapthaEvent — API Developer Portal Stylesheet
+   ============================================================ */
+
+:root {
+  /* On the portal brand since UPG-63: navy navigation, light reading area,
+     dark code blocks for legibility */
+  --dev-bg: #f4f6fa;
+  --dev-sidebar: #001046;
+  --dev-border: #e2e8f0;
+  --dev-text: #1e293b;
+  --dev-text-muted: #64748b;
+  --dev-accent: #14307a;
+  --dev-code-bg: #0b1530;
+  --dev-nav-text: rgba(255, 255, 255, 0.78);
+  
+  --method-get: #2ea043;
+  --method-post: #238636;
+  --method-put: #d29922;
+  --method-delete: #f85149;
+}
+
+body.dev-portal {
+  background-color: var(--dev-bg);
+  color: var(--dev-text);
+  font-family: var(--font-sans, 'Inter', sans-serif);
+  margin: 0;
+  padding: 0;
+}
+
+.dev-container {
+  display: flex;
+  min-height: 100vh;
+}
+
+/* Sidebar Styling */
+.dev-sidebar {
+  width: 280px;
+  background-color: var(--dev-sidebar);
+  border-right: 1px solid var(--dev-border);
+  padding: 24px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.dev-sidebar-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dev-sidebar-menu {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.dev-sidebar { border-right: 3px solid #c69d67; }
+.dev-menu-section {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: rgba(255, 255, 255, 0.5);
+  margin: 16px 0 8px;
+  font-weight: 700;
+}
+
+.dev-menu-item a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--dev-nav-text);
+  text-decoration: none;
+  font-size: 0.88rem;
+  padding: 8px 12px;
+  border-radius: 6px;
+  transition: background 0.2s, color 0.2s;
+}
+
+.dev-menu-item a:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: #fff;
+}
+
+.dev-menu-item.active a {
+  background-color: rgba(198, 157, 103, 0.18);
+  color: #fff;
+  box-shadow: inset 3px 0 0 #c69d67;
+  font-weight: 600;
+}
+
+/* Main Content Area */
+.dev-content {
+  flex: 1;
+  padding: 40px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.endpoint-section {
+  border-bottom: 1px solid var(--dev-border);
+  padding-bottom: 40px;
+  margin-bottom: 40px;
+}
+
+/* Method Badge */
+.method-badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #fff;
+  text-transform: uppercase;
+  margin-right: 8px;
+}
+
+.method-badge.get { background-color: var(--method-get); }
+.method-badge.post { background-color: var(--method-post); }
+.method-badge.put { background-color: var(--method-put); }
+.method-badge.delete { background-color: var(--method-delete); }
+
+.endpoint-url {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.95rem;
+  color: var(--dev-text);
+  font-weight: 600;
+}
+
+/* Try it out Panel */
+.try-panel {
+  background: #ffffff;
+  border: 1px solid var(--dev-border);
+  border-radius: 8px;
+  padding: 20px;
+  margin-top: 24px;
+}
+
+.code-block-wrap {
+  position: relative;
+  background: var(--dev-code-bg);
+  border: 1px solid var(--dev-border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-top: 16px;
+}
+
+.code-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.code-lang-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.code-tab {
+  background: transparent;
+  border: none;
+  color: var(--dev-text-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.code-tab { color: rgba(255, 255, 255, 0.6); }
+.code-tab.active {
+  color: #dcc199;
+  background: rgba(198, 157, 103, 0.15);
+}
+
+.code-pre {
+  margin: 0;
+  padding: 16px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: #dbe4ff;
+  background: var(--dev-code-bg);
+  overflow-x: auto;
+}
+
+.copy-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: color 0.2s;
+}
+
+.copy-btn:hover {
+  color: #fff;
+}
+
+.btn-execute {
+  background-color: #00185e;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 10px 20px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.btn-execute:hover {
+  opacity: 0.9;
+}
