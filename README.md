@@ -101,6 +101,17 @@ cp .env.example .env          # then fill in what you need
 python app.py                 # http://localhost:5001
 ```
 
+**Or try it with sample data** (no `.env` needed): a men's league with
+results and a match being scored live, and a women's triangular series.
+
+```bash
+zsh scripts/sample_data.sh load     # once
+zsh scripts/sample_data.sh serve    # http://localhost:5001
+```
+
+Logins (password `SportsDemo@2026`): `admin@example.com`, `spoc@example.com`,
+`coordinator@example.com`. `zsh scripts/sample_data.sh reset` starts it again.
+
 Make the first Super Admin (local database only):
 
 ```bash
@@ -125,11 +136,10 @@ Never commit `.env`, a service account key, or a local `.db` file.
 
 ## What happens next
 
-1. Take out the parts that are not about sports, one at a time, running the
-   tests after each.
-2. A sports-only home page and menus.
-3. Keep the previous fixtures and their results whenever fixtures are
-   replaced, with a button to go back.
+The work list is [docs/SPORTS_TODO.md](docs/SPORTS_TODO.md). It starts with
+keeping the previous fixtures and their results when fixtures are replaced,
+then taking out the parts that are not about sports, and a sports home page.
+Coding agents: read [CLAUDE.md](CLAUDE.md) first.
 
 ## License
 
