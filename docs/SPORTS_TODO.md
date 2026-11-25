@@ -17,6 +17,7 @@ go in at the bottom with the next free number (SP-12, SP-13, …).
 | SP-09 | Teams level on everything are ordered by name | TODO |
 | SP-10 | Card rules (green, yellow, red) are shown as done | TODO |
 | SP-11 | Bring back one match's raid record from a database backup | TODO |
+| SP-12 | IPL-style playoffs: Qualifier 1, Eliminator, Qualifier 2, final | DONE |
 
 ---
 
@@ -112,3 +113,14 @@ Write the steps (a copy of the database from a backup, read the one match's
 records, write them back to the live database) for a match whose raid
 record was deleted. The owner runs them. Nothing else on the live database
 changes.
+
+### SP-12 — IPL-style playoffs: Qualifier 1, Eliminator, Qualifier 2, final
+
+**DONE** (UPG-479 in the main portal, `e28cab8` there; live on the main
+portal as `saptha-e28c`). The owner asked for the pool playoffs in the IPL
+format: 1st A v 1st B (Qualifier 1), 2nd A v 2nd B (Eliminator), Q1's loser v
+the Eliminator's winner (Qualifier 2), then Q1's winner v Q2's winner in the
+final: 4 matches. On the tournament page: Playoffs → Playoff format → IPL
+style → Save the format. Choosing it changes no match, result or table;
+semi-finals stay the default. Q2's loser is third. Tests:
+`tests/test_ipl_playoffs.py`.
